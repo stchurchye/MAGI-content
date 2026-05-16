@@ -1,0 +1,21 @@
+<div class="task-card-head">
+    <div class="task-card-title-row">
+        {% if job_seq is defined %}
+        <span class="task-seq" aria-label="序号 {{ job_seq }}">{{ "%02d"|format(job_seq) }}</span>
+        {% endif %}
+        <p class="task-title">{% if card_title_override is defined %}{{ card_title_override }}{% else %}{{ job.display_title }}{% endif %}</p>
+    </div>
+    <div class="task-card-meta">
+        <span class="task-platform tag-{{ job.platform or 'generic' }}">{{ job.platform_label }}</span>
+        <span class="meta-sep" aria-hidden="true">·</span>
+        <span class="task-status status-{{ job.status }}">{{ job.status_label }}</span>
+        {% if card_meta_time is defined and card_meta_time %}
+        <span class="meta-sep" aria-hidden="true">·</span>
+        <span class="task-time">{{ card_meta_time }}</span>
+        {% endif %}
+        {% if card_meta_duration is defined and card_meta_duration %}
+        <span class="meta-sep" aria-hidden="true">·</span>
+        <span class="task-duration">{{ card_meta_duration }}</span>
+        {% endif %}
+    </div>
+</div>

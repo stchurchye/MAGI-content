@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block scripts %}
+<script src="/static/queue.js" defer></script>
+{% endblock %}
+{% block content %}
+
+<div class="queue-page">
+    <nav class="queue-nav" aria-label="页面导航">
+        <a href="/" class="queue-nav-link queue-nav-home" data-nav-home>← 首页</a>
+        <span class="queue-nav-sep" aria-hidden="true">/</span>
+        <span class="queue-nav-current">{{ page_title }}</span>
+    </nav>
+    <div class="queue-page-head">
+        <div class="magi-hud-row">
+            <span class="section-title">{{ page_subtitle }}</span>
+            <span class="bar"></span>
+            <span>{{ page_title }}</span>
+        </div>
+    </div>
+
+    <div class="toolbar queue-toolbar">
+        <div class="search-bar">
+            <input type="text" class="search-input" id="search-input"
+                   placeholder="搜索标题或链接"
+                   value="{{ query }}">
+            <button type="button" class="magi-btn solid btn-sm" onclick="doSearch('{{ list_path }}')">搜索</button>
+            {% if query %}
+            <a href="{{ list_path }}" class="magi-btn ghost btn-sm">清除</a>
+            {% endif %}
+        </div>
+        <p class="queue-meta">{{ total }} 条任务</p>
+    </div>
+
+    {% if jobs %}
+    <div class="task-list queue-task-list" data-seq-start="{{ (page - 1) * per_page }}">
+        {% for job in jobs %}
+        {% with job_seq=(page - 1) * per_page + loop.index %}
+        {% include "partials/task_card_list.html" %}
+        {% endwith %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>{{ empty_message }}</p>
+        <p class="empty-state-hint"><a href="/">返回首页</a></p>
+    </div>
+    {% endif %}
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="{{ list_path }}?page={{ page - 1 }}{% if query %}&q={{ query }}{% endif %}">上一页</a>
+        {% else %}
+        <span class="pagination-disabled">上一页</span>
+        {% endif %}
+        <span class="pagination-current">{{ page }} / {{ total_pages }}</span>
+        {% if page < total_pages %}
+        <a href="{{ list_path }}?page={{ page + 1 }}{% if query %}&q={{ query }}{% endif %}">下一页</a>
+        {% else %}
+        <span class="pagination-disabled">下一页</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <footer class="queue-page-foot">
+        <a href="/" class="magi-btn ghost btn-sm" data-nav-home>← 返回首页</a>
+    </footer>
+</div>
+
+{% endblock %}

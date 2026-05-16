@@ -1,0 +1,41 @@
+<div class="task-card {% if job.is_archived %}card-archived{% elif job.is_failed %}card-error{% elif job.is_completed %}card-completed{% endif %}{% if card_variant == 'failed_log' %} card-failed-log{% endif %}" data-job-id="{{ job.id }}">
+    <div class="task-card-inner">
+        {% if job.is_failed and card_variant == 'failed_log' %}
+        <a href="/jobs/{{ job.id }}" class="task-card-link task-card-link-failed" data-sfx="soft">
+            {% set card_meta_time = job.created_at %}
+            {% if job.title and job.title|lower != 'unknown' %}
+            {% set card_title_override = job.title %}
+            {% else %}
+            {% set card_title_override = job.platform_label ~ ' · 失败' %}
+            {% endif %}
+            {% include "partials/task_card_head.html" %}
+            {% if job.url %}
+            <p class="card-failed-url" title="{{ job.url }}">{{ job.url }}</p>
+            {% endif %}
+            <div class="error-info error-info-failed-log">{{ job.error_message or '未知错误' }}</div>
+        </a>
+        {% else %}
+        <a href="/jobs/{{ job.id }}" class="task-card-link" data-sfx="soft">
+            {% set card_meta_time = job.created_at %}
+            {% set card_meta_duration = job.duration_display if job.duration_sec else none %}
+            {% include "partials/task_card_head.html" %}
+            {% if job.is_failed %}
+            <div class="error-info error-info-compact" title="{{ job.error_message or '' }}">{{ job.error_message or '未知错误' }}</div>
+            {% endif %}
+            {% if job.is_completed and job.summary_display %}
+            <p class="card-inline-summary">摘要 · {{ job.summary_display[:200] }}{% if job.summary_display|length > 200 %}…{% endif %}</p>
+            {% endif %}
+        </a>
+        {% if job.is_completed and job.transcript_path %}
+        <details class="card-preview-details">
+            <summary>{% if job.transcript_text %}转录（{{ job.transcript_text|length }} 字）{% else %}转录文本{% endif %}</summary>
+            {% if job.transcript_text %}
+            <pre class="card-preview-text">{{ job.transcript_text[:600] }}{% if job.transcript_text|length > 600 %}…{% endif %}</pre>
+            {% else %}
+            <p class="card-preview-text text-error">未返回转录内容</p>
+            {% endif %}
+        </details>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>

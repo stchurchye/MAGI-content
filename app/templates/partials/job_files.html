@@ -1,0 +1,22 @@
+{% if job.video_path or job.audio_path or job.transcript_path or job.summary_path or job.danmaku_path or job.images_dir %}
+<div class="file-list">
+    {% if job.video_path %}
+    <a href="/api/jobs/{{ job.id }}/files/video" class="file-item" download>视频 · {{ job.video_path.split('/')[-1] }}</a>
+    {% endif %}
+    {% if job.audio_path %}
+    <a href="/api/jobs/{{ job.id }}/files/audio" class="file-item" download>音频 · {{ job.audio_path.split('/')[-1] }}</a>
+    {% endif %}
+    {% if job.transcript_path %}
+    <a href="/api/jobs/{{ job.id }}/files/transcript" class="file-item" download>转录 · {{ job.transcript_path.split('/')[-1] }}</a>
+    {% endif %}
+    {% if job.summary_path %}
+    <a href="/api/jobs/{{ job.id }}/files/summary" class="file-item" download>摘要 · {{ job.summary_path.split('/')[-1] }}</a>
+    {% endif %}
+    {% if job.danmaku_path %}
+    <a href="/api/jobs/{{ job.id }}/files/danmaku" class="file-item" download>弹幕 · {{ job.danmaku_path.split('/')[-1] }}</a>
+    {% endif %}
+    {% if job.images_dir %}
+    <span class="file-item file-item-static">图片目录 · {{ job.images_dir.split('/')[-1] }}</span>
+    {% endif %}
+</div>
+{% endif %}

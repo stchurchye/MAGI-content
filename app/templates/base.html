@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAGI-CONTENT</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/sfx.js" defer></script>
+    <script src="/static/ui.js" defer></script>
+    {% block scripts %}{% endblock %}
+</head>
+<body>
+    <header class="top-bar">
+        <div class="boot-brand">
+            <span class="magi-pip ok" aria-hidden="true"></span>
+            <a href="/" class="title" title="返回首页" data-sfx="soft">SEELE · MAGI-CONTENT</a>
+        </div>
+        <div class="boot-meta">
+            <button type="button" class="magi-btn ghost btn-sm sfx-toggle" id="sfx-toggle" aria-pressed="true" title="音效：开">
+                <span class="magi-pip ok" aria-hidden="true"></span>
+                <span class="sfx-toggle-label">SFX ON</span>
+            </button>
+            <span class="boot-meta-sep" aria-hidden="true">·</span>
+            <span>L.C.L · 内容管线</span>
+            <span class="magi-pip ok" title="系统运行中"></span>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+    window.UI_STRINGS = {
+        confirmDelete: "确定删除该任务及全部文件？",
+        confirmCancel: "确定取消此任务？",
+        btnSubmitting: "同步中…",
+        errorRetryFailed: "重试失败",
+        errorRetryRequest: "重试请求失败",
+        errorSubmitFailed: "提交失败",
+        errorCookieSync: "Cookie 同步失败",
+        toastCancelled: "任务已取消"
+    };
+    </script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+"""平台检测 + 平台规则配置 + URL 规范化。"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+
+@dataclass
+class PlatformRule:
+    key: str
+    name: str
+    domains: list[str]
+    default_downloader: str                           # ytdlp / yutto / gallerydl
+    alt_downloader: Optional[str] = None              # 备用下载器
+    media_type: str = "video"                         # video / image_text
+    strictness: str = "medium"                        # low / medium / high
+    needs_cookie: str = "optional"                    # none / optional / required
+    needs_proxy: str = "none"                         # none / optional / required
+    rate_limit: str = "none"                          # none / moderate / aggressive
+    note: str = ""
+
+
+PLATFORM_RULES: dict[str, PlatformRule] = {
+    "bilibili": PlatformRule(
+        key="bilibili",
+        name="B站",
+        domains=["bilibili.com", "b23.tv", "www.bilibili.com"],
+        default_downloader="yutto",
+        alt_downloader="ytdlp",
+        strictness="high",
+        needs_cookie="required",
+        rate_limit="moderate",
+        note="yt-dlp 已无法直接下载 B站，默认使用 yutto；如需高清格式可手动切 yt-dlp + cookie",
+    ),
+    "youtube": PlatformRule(
+        key="youtube",
+        name="YouTube",
+        domains=["youtube.com", "youtu.be", "www.youtube.com", "m.youtube.com"],
+        default_downloader="ytdlp",
+        strictness="high",
+        needs_cookie="optional",
+        needs_proxy="optional",
+        note="中国大陆可能需要代理；地域限制/年龄限制视频需要 cookie",
+    ),
+    "xiaohongshu": PlatformRule(
+        key="xiaohongshu",
+        name="小红书",
+        domains=["xiaohongshu.com", "xhslink.com", "www.xiaohongshu.com"],
+        default_downloader="xhs",
+        media_type="image_text",
+        strictness="high",
+        needs_cookie="required",
+        note="使用 XHS-Downloader，支持图文和视频",
+    ),
+    "douyin": PlatformRule(
+        key="douyin",
+        name="抖音",
+        domains=["douyin.com", "www.douyin.com", "v.douyin.com"],
+        default_downloader="ytdlp",
+        strictness="high",
+        needs_cookie="optional",
+        rate_limit="aggressive",
+        note="反爬严格，可能需要频繁更新 cookie",
+    ),
+    "nicovideo": PlatformRule(
+        key="nicovideo",
+        name="N站",
+        domains=["nicovideo.jp", "www.nicovideo.jp", "nico.ms"],
+        default_downloader="ytdlp",
+        strictness="medium",
+        needs_cookie="optional",
+        note="部分视频需要日本 IP + 登录",
+    ),
+    "generic": PlatformRule(
+        key="generic",
+        name="通用",
+        domains=[],
+        default_downloader="ytdlp",
+        strictness="low",
+        note="兜底规则，尝试 yt-dlp 通用提取",
+    ),
+}
+
+
+def normalize_url(url: str, rule: PlatformRule) -> str:
+    """将分享/短链接转成下载器需要的标准格式。"""
+    cleaned = url.strip()
+    if cleaned and "://" not in cleaned:
+        cleaned = "https://" + cleaned
+    parsed = urlparse(cleaned)
+
+    if rule.key == "xiaohongshu":
+        # /discovery/item/xxx → /explore/xxx，保留 xsec_token
+        path = parsed.path
+        if "/discovery/item/" in path:
+            note_id = path.rsplit("/", 1)[-1]
+            path = f"/explore/{note_id}"
+        keep = {k: v[0] for k, v in parse_qs(parsed.query).items()
+                if k in ("xsec_token", "xsec_source")}
+        qs = urlencode(keep) if keep else ""
+        return urlunparse((parsed.scheme, parsed.netloc, path, "", qs, ""))
+
+    if rule.key == "douyin":
+        # 保留必要参数（如 modal_id），去追踪参数
+        keep = {k: v[0] for k, v in parse_qs(parsed.query).items()
+                if k in ("modal_id", "video_id", "item_id")}
+        qs = urlencode(keep) if keep else ""
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", qs, ""))
+
+    if rule.key == "bilibili":
+        # b23.tv 短链不处理
+        if "b23.tv" in parsed.netloc.lower():
+            return cleaned
+        # 去除全部追踪参数，只保留路径中的 BV 号
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+    return cleaned
+
+
+def detect_platform(url: str) -> tuple[PlatformRule, str]:
+    """
+    根据 URL 检测平台，返回 (规则, 匹配方式)。
+
+    匹配方式: 'domain' | 'generic'
+    """
+    cleaned = url.strip()
+    if cleaned and "://" not in cleaned:
+        cleaned = "https://" + cleaned
+
+    try:
+        host = urlparse(cleaned).hostname or ""
+    except Exception:
+        return PLATFORM_RULES["generic"], "generic"
+
+    host_lower = host.lower().removeprefix("www.")
+
+    for rule in PLATFORM_RULES.values():
+        if rule.key == "generic":
+            continue
+        for domain in rule.domains:
+            clean = domain.lower().removeprefix("www.")
+            if host_lower == clean or host_lower.endswith("." + clean):
+                return rule, "domain"
+
+    return PLATFORM_RULES["generic"], "generic"
+
+
+def get_platform_note(url: str) -> str:
+    """获取平台备注信息（用于前端提示）。"""
+    rule, _ = detect_platform(url)
+    parts = [f"平台: {rule.name}"]
+    if rule.needs_cookie in ("required", "optional"):
+        parts.append("可能需要 Cookie")
+    if rule.needs_proxy in ("required", "optional"):
+        parts.append("可能需要代理")
+    if rule.rate_limit != "none":
+        parts.append(f"有速率限制({rule.rate_limit})")
+    parts.append(rule.note)
+    return " | ".join(parts)

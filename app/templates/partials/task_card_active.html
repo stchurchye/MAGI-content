@@ -1,0 +1,23 @@
+<div class="task-card card-active" data-job-id="{{ job.id }}">
+    <div class="task-card-inner">
+        <a href="/jobs/{{ job.id }}" class="task-card-link" data-sfx="soft">
+            {% include "partials/task_card_head.html" %}
+            <div class="magi-progress active">
+                <div class="bar progress-fill active" style="width: {{ job.progress_pct }}%"></div>
+            </div>
+            <div class="task-meta task-meta-progress">
+                <span class="task-progress-line">
+                    <span class="progress-pct">{{ job.progress_pct }}%</span>
+                    <span class="meta-sep" aria-hidden="true">·</span>
+                    <span class="stage-label">{{ job.stage_label }}</span>
+                </span>
+                {% if stale_job_minutes is defined and job.is_stuck(stale_job_minutes) %}
+                <span class="stuck-badge">可能已卡住</span>
+                {% endif %}
+            </div>
+        </a>
+        <div class="task-card-footer">
+            <button type="button" class="magi-btn ghost btn-sm" data-action="cancel" data-job-id="{{ job.id }}">取消</button>
+        </div>
+    </div>
+</div>

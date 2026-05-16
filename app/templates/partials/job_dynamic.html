@@ -1,0 +1,37 @@
+{% if job.is_failed %}
+<section class="job-block job-block-error" id="error-section">
+    <h2 class="job-block-label">错误信息</h2>
+    <div class="error-info error-info-detail" id="error-msg">{{ job.error_message or '未知错误' }}</div>
+    <p class="error-stage-meta">阶段：{{ job.error_stage or 'unknown' }} · 已重试 {{ job.retry_count }} 次</p>
+</section>
+{% endif %}
+
+<section class="job-block" id="summary-section"{% if not job.summary_display and not summary_html %} hidden{% endif %}>
+    <h2 class="job-block-label">内容摘要</h2>
+    <div class="job-block-body summary-box prose" id="summary-text">{% if summary_html %}{{ summary_html | safe }}{% else %}{{ job.summary_display or '' }}{% endif %}</div>
+</section>
+
+{% if not job.is_active %}
+{% include "partials/job_timeline.html" %}
+{% endif %}
+
+{% if job.transcript_text %}
+<section class="job-block" id="transcript-section">
+    <h2 class="job-block-label">转录文本 <span class="job-block-meta">{{ job.transcript_text|length }} 字</span></h2>
+    <pre class="job-block-body content-mono job-transcript" id="transcript-text">{{ job.transcript_text }}</pre>
+</section>
+{% else %}
+<section class="job-block" id="transcript-section" hidden>
+    <h2 class="job-block-label">转录文本</h2>
+    <pre class="job-block-body content-mono job-transcript" id="transcript-text"></pre>
+</section>
+{% endif %}
+
+{% if job.video_path or job.audio_path or job.transcript_path or job.summary_path or job.danmaku_path or job.images_dir %}
+<section class="job-block" id="files-section">
+    <h2 class="job-block-label">下载文件</h2>
+    <div class="job-block-body">
+        {% include "partials/job_files.html" %}
+    </div>
+</section>
+{% endif %}

@@ -1,0 +1,15 @@
+.env
+.venv
+venv
+__pycache__
+*.pyc
+.git
+.gitignore
+storage
+data
+logs
+.DS_Store
+.vscode
+.idea
+*.md
+.cursor

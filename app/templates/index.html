@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block scripts %}
+<script src="/static/app.js" defer></script>
+{% endblock %}
+{% block content %}
+
+<div class="home-layout">
+    <aside class="home-sidebar" aria-label="历史记录">
+        {% if failed_count > 0 or stuck_count > 0 %}
+        <a href="/jobs/failed" class="history-alert{% if stuck_count > 0 %} history-alert-warn{% endif %}" id="failed-alert" data-sfx="soft">
+            <span class="history-alert-dot" aria-hidden="true"></span>
+            <span class="history-alert-text" id="failed-alert-text">
+                {%- if failed_count > 0 -%}{{ failed_count }} 条失败{%- endif -%}
+                {%- if failed_count > 0 and stuck_count > 0 %}，{% endif -%}
+                {%- if stuck_count > 0 -%}{{ stuck_count }} 条进行中卡住（超过 {{ stale_job_minutes }} 分钟）{%- endif -%}
+                 · 查看详情
+            </span>
+            <span class="history-alert-arrow" aria-hidden="true">→</span>
+        </a>
+        {% endif %}
+
+        <div class="toolbar home-toolbar">
+            <div class="search-bar search-bar-inline">
+                <input type="text" class="search-input" id="search-input"
+                       placeholder="搜索标题或链接"
+                       value="{{ query }}">
+                <select id="platform-filter" class="platform-filter-select" aria-label="平台筛选">
+                    {% for value, label in platform_filter_options %}
+                    <option value="{{ value }}"{% if platform_filter == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="magi-btn solid btn-sm" data-sfx="click" onclick="doSearch()">搜索</button>
+                {% if query or platform_filter %}
+                <a href="/" class="magi-btn ghost btn-sm">清除</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="home-sidebar-scroll">
+            <section class="section section-compact" id="active-section"{% if not active_jobs %} hidden{% endif %}>
+                <div class="magi-hud-row">
+                    <span class="section-title">ACTIVE</span>
+                    <span class="bar"></span>
+                    <span>进行中</span>
+                </div>
+                <div class="task-list" id="active-tasks">
+                    {% for job in active_jobs %}
+                    {% include "partials/task_card_active.html" %}
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="section section-compact" id="job-list-section"
+                     data-has-filter="{% if platform_filter or query %}1{% else %}0{% endif %}"
+                     {% if not jobs and not active_jobs and not platform_filter and not query %} hidden{% endif %}>
+                {% if total > 0 or platform_filter or query %}
+                <div class="magi-hud-row queue-hud-row">
+                    <span class="section-title">QUEUE</span>
+                    <span class="bar"></span>
+                    <span class="queue-meta">
+                        共 {{ total }} 条
+                        {%- if total > 0 -%}
+                        · 第 {{ (page - 1) * per_page + 1 }}–{% if page * per_page > total %}{{ total }}{% else %}{{ page * per_page }}{% endif %} 条
+                        {%- endif -%}
+                        {%- if total_pages > 1 %} · {{ page }}/{{ total_pages }} 页{%- endif -%}
+                    </span>
+                </div>
+                {% endif %}
+                <div class="task-list" id="job-list" data-seq-start="{{ (page - 1) * per_page }}">
+                    {% for job in jobs %}
+                    {% with job_seq=(page - 1) * per_page + loop.index %}
+                    {% include "partials/task_card_list.html" %}
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+                <div id="filter-empty" class="filter-empty filter-empty-compact"{% if jobs %} hidden{% endif %}>
+                    <p>{% if platform_filter %}该平台暂无记录{% elif query %}未找到匹配任务{% else %}暂无记录{% endif %}</p>
+                </div>
+
+                {% if total_pages > 1 %}
+                <div class="pagination pagination-compact">
+                    {% if page > 1 %}
+                    <a href="/?page={{ page - 1 }}{% if platform_filter %}&platform={{ platform_filter }}{% endif %}{% if query %}&q={{ query }}{% endif %}">上一页</a>
+                    {% else %}
+                    <span class="pagination-disabled">上一页</span>
+                    {% endif %}
+                    <span class="pagination-current">{{ page }} / {{ total_pages }}</span>
+                    {% if page < total_pages %}
+                    <a href="/?page={{ page + 1 }}{% if platform_filter %}&platform={{ platform_filter }}{% endif %}{% if query %}&q={{ query }}{% endif %}">下一页</a>
+                    {% else %}
+                    <span class="pagination-disabled">下一页</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </section>
+
+            <div id="empty-state" class="empty-state empty-state-compact"{% if active_jobs or jobs or platform_filter or query %} hidden{% endif %}>
+                <p>外源情报队列为空</p>
+                <p class="empty-state-hint">在右侧输入 URL 启动同步</p>
+            </div>
+        </div>
+
+        <div class="home-sidebar-foot">
+            <a href="/jobs/archived" class="history-link" data-sfx="soft">已归档 →</a>
+        </div>
+    </aside>
+
+    <div class="home-main">
+        <section class="section hero-section">
+            <header class="hero-brand" aria-label="MAGI-CONTENT">
+                <h1 class="hero-title">
+                    <span class="hero-title-accent">MAGI</span><span class="hero-title-rest">-CONTENT</span>
+                </h1>
+                <p class="hero-tagline">外源情报采集 · 整编后同步至 MAGI</p>
+            </header>
+            <form method="POST" action="/api/jobs" class="url-form url-form-hero" id="url-form">
+                <label class="form-label sr-only" for="url-input">外源情报 URL</label>
+                <textarea id="url-input" name="url" class="url-input url-input-hero url-input-mono" rows="9"
+                    placeholder="粘贴媒体链接，每行一条&#10;B站 · YouTube · 小红书 · 抖音" required></textarea>
+                <div class="hero-form-bar">
+                    <div class="dl-field dl-field-compact">
+                        <label class="form-label form-label-compact" id="downloader-label">下载器</label>
+                        <input type="hidden" name="downloader" id="downloader-input" value="auto">
+                        <details class="dl-picker" id="downloader-picker">
+                            <summary class="dl-picker-trigger" id="downloader-summary">自动选择</summary>
+                            <div class="dl-picker-list" role="listbox" aria-labelledby="downloader-label">
+                                {% for value, label in downloader_options %}
+                                <button type="button" class="dl-picker-option{% if value == 'auto' %} is-selected{% endif %}" role="option" data-value="{{ value }}">{{ label }}</button>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    </div>
+                    <button type="submit" class="magi-btn solid hero-submit" id="btn-submit" data-sfx="confirm">启动同步</button>
+                </div>
+                <details class="hero-more" id="cookie-panel" aria-label="平台 Cookie">
+                    <summary class="hero-more-summary">平台 Cookie <span class="hero-more-hint">小红书等需单独配置</span></summary>
+                    <div class="hero-more-body cookie-panel">
+                        <ul class="cookie-status-list" id="cookie-status-list" aria-live="polite"></ul>
+                        <div class="cookie-actions">
+                            <label class="sr-only" for="cookie-browser">浏览器</label>
+                            <select id="cookie-browser" class="magi-input cookie-browser-select" title="读取 Cookie 的浏览器">
+                                <option value="chrome">Chrome</option>
+                                <option value="safari">Safari</option>
+                                <option value="edge">Edge</option>
+                                <option value="firefox">Firefox</option>
+                            </select>
+                            <button type="button" class="magi-btn ghost btn-sm" id="btn-sync-xhs-cookie"
+                                    data-cookie-action="sync-xhs">同步小红书</button>
+                            <button type="button" class="magi-btn ghost btn-sm"
+                                    data-cookie-action="paste-xhs">粘贴 Cookie</button>
+                        </div>
+                    </div>
+                </details>
+            </form>
+        </section>
+    </div>
+</div>
+
+{% endblock %}

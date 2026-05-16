@@ -1,0 +1,17 @@
+{% set stages = timeline_stages if timeline_stages is defined else [] %}
+{% if stages %}
+<section class="job-block job-block-timeline">
+    <h2 class="job-block-label">处理流程</h2>
+    <div class="timeline-wrap">
+        <div class="timeline" id="timeline">
+            {% for sid, slabel, spct in stages %}
+            {% set done = job.progress_pct >= spct %}
+            <div class="tl-node {{ 'done' if done else '' }} {{ 'failed' if job.is_failed and job.error_stage == sid else '' }}" id="tl-{{ sid }}">
+                <span class="tl-dot"></span>
+                <span class="tl-label">{{ slabel }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}

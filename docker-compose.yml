@@ -1,0 +1,34 @@
+services:
+  magi-content:
+    build: .
+    image: magi-content:latest
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # YouTube 等外网需代理；与 docker-build.sh 默认一致，可在 .env 覆盖或置空关闭
+      HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
+      HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+    volumes:
+      - ./storage:/app/storage
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./static:/app/static
+      - ./app/templates:/app/app/templates
+      - ./app:/app/app
+    # 挂载 app 后自动重载，避免改代码后 API 仍 404
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--reload",
+        "--reload-dir",
+        "/app/app",
+      ]
+    restart: unless-stopped

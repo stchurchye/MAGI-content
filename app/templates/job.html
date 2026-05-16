@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block scripts %}
+<script>
+window.JOB_ID = "{{ job.id }}";
+window.JOB_IS_ACTIVE = {{ 'true' if job.is_active else 'false' }};
+</script>
+<script src="/static/job.js" defer></script>
+{% endblock %}
+{% block content %}
+
+{% if job.title and job.title|lower != 'unknown' %}
+{% set job_page_title = job.title %}
+{% else %}
+{% set job_page_title = job.platform_label ~ ' · ' ~ job.status_label %}
+{% endif %}
+
+<div class="job-detail">
+    <header class="job-detail-top">
+        <a href="javascript:history.back()" class="job-back magi-btn ghost btn-sm">← 返回</a>
+        <div class="job-detail-actions">
+            {% if job.is_failed %}
+            <button type="button" class="magi-btn warn btn-sm" data-action="retry">重试</button>
+            <button type="button" class="magi-btn danger btn-sm" data-action="delete">删除</button>
+            {% elif job.is_completed and not job.is_archived %}
+            <button type="button" class="magi-btn ghost btn-sm" data-action="archive">归档</button>
+            <button type="button" class="magi-btn danger btn-sm" data-action="delete">删除</button>
+            {% elif job.is_archived %}
+            <button type="button" class="magi-btn ghost btn-sm" data-action="unarchive">取消归档</button>
+            <button type="button" class="magi-btn danger btn-sm" data-action="delete">删除</button>
+            {% endif %}
+        </div>
+    </header>
+
+    <section class="job-hero magi-panel">
+        <h1 class="job-hero-title">{{ job_page_title }}</h1>
+        <p class="job-hero-meta">
+            <span>{{ job.platform_label }}</span>
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span class="job-hero-status status-{{ job.status }}">{{ job.status_label }}</span>
+            {% if job.created_at %}
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span>{{ job.created_at }}</span>
+            {% endif %}
+            {% if job.duration_sec %}
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span>{{ job.duration_display }}</span>
+            {% endif %}
+        </p>
+        {% if job.url %}
+        <p class="job-hero-url">
+            <a href="{{ job.url }}" target="_blank" rel="noopener noreferrer" class="link">{{ job.url }}</a>
+        </p>
+        {% endif %}
+        <p class="job-hero-extra">
+            <span>{{ job.downloader_label }}</span>
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span class="job-hero-id">{{ job.id[:8] }}</span>
+        </p>
+    </section>
+
+    {% if job.is_active %}
+    <section class="job-block job-block-progress magi-panel" id="progress-section">
+        <div class="job-block-head">
+            <h2 class="job-block-label">处理中</h2>
+            <span class="job-progress-meta">
+                <span id="progress-pct">{{ job.progress_pct }}%</span>
+                <span class="meta-sep" aria-hidden="true">·</span>
+                <span id="progress-stage">{{ job.stage_label }}</span>
+            </span>
+        </div>
+        <div class="magi-progress active">
+            <div class="bar progress-fill active" id="progress-fill" style="width: {{ job.progress_pct }}%"></div>
+        </div>
+        <button type="button" class="magi-btn ghost btn-sm job-progress-cancel" data-action="cancel">取消任务</button>
+    </section>
+    {% endif %}
+
+    <div id="job-dynamic" class="job-dynamic">
+        {% if not job.is_active %}
+        {% include "partials/job_dynamic.html" %}
+        {% endif %}
+    </div>
+
+    {% if log_text %}
+    <details class="job-block job-block-log log-panel">
+        <summary class="job-block-label">运行日志</summary>
+        <pre class="log-content content-mono">{{ log_text }}</pre>
+    </details>
+    {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,31 @@
+# 环境变量
+.env
+
+# Cookie / 凭证（勿提交）
+cookies.txt
+
+# 存储目录（所有任务产出）
+storage/
+
+# 数据库
+data/
+
+# 日志
+logs/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
