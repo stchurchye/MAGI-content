@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error_stage     TEXT,
     retry_count     INTEGER DEFAULT 0,
     progress_pct    INTEGER DEFAULT 0,
+    is_archived     INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -8,7 +8,7 @@ import shutil
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -42,6 +42,36 @@ templates = None
 async def health():
     """健康检查端点。"""
     return {"status": "ok", "version": "0.2.0"}
+
+
+@router.get("/api/search/semantic")
+async def semantic_search(
+    q: str = Query(..., min_length=1),
+    k: int = Query(5, ge=1, le=20),
+):
+    """跨任务语义检索（向量库）。未配置 embedder 时 enabled=False。"""
+    from app.services.vectorstore import get_vector_store
+
+    vs = get_vector_store()
+    if not vs.enabled:
+        return {
+            "enabled": False,
+            "hits": [],
+            "message": "语义检索未启用：设置 EMBEDDING_BACKEND=openai 与 EMBEDDING_API_KEY（或 =local 测试）",
+        }
+    hits = vs.search(q, k=k)
+    return {
+        "enabled": True,
+        "hits": [
+            {
+                "job_id": h.job_id,
+                "title": h.title,
+                "excerpt": h.excerpt,
+                "distance": round(h.distance, 4),
+            }
+            for h in hits
+        ],
+    }
 
 
 def _get_templates():
@@ -339,6 +369,66 @@ async def create_job(
 
     if "application/json" in request.headers.get("accept", "").lower():
         return {"jobs": created}
+    return RedirectResponse(url="/", status_code=303)
+
+
+_ALLOWED_UPLOAD_EXTS = {
+    # 视频/音频
+    ".mp4", ".mov", ".mkv", ".webm", ".flv", ".avi", ".m4v",
+    ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg",
+    # 图片（与 ocr.IMAGE_EXTS 对齐）
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".avif", ".heic",
+}
+
+
+@router.post("/api/jobs/upload")
+async def upload_job(request: Request, file: UploadFile = File(...)):
+    """本地文件上传建任务：保存到 storage/{job_id}/，downloader=local 跳过下载。"""
+    cfg = get_config()
+    pipeline = get_pipeline_manager()
+
+    # 防路径穿越：只取文件名部分
+    safe_name = os.path.basename(file.filename or "upload")
+    if not safe_name or safe_name in (".", ".."):
+        safe_name = "upload.bin"
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in _ALLOWED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext or '(无扩展名)'}")
+
+    job_id = str(uuid.uuid4())
+    job_dir = os.path.join(cfg.storage_dir, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    dest = os.path.join(job_dir, safe_name)
+
+    # 大小上限：边写边累计，超限即中止并清理，避免超大文件耗尽磁盘
+    max_bytes = cfg.max_upload_mb * 1024 * 1024
+    written = 0
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件超过上限 {cfg.max_upload_mb}MB",
+                    )
+                f.write(chunk)
+    except Exception:
+        # 任何异常（超限 / 客户端断连 / 磁盘错误）都清理残留，避免孤儿文件堆积占盘
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise
+
+    conn = get_db(cfg.db_path)
+    insert_job(conn, job_id, dest)
+    conn.commit()
+    conn.close()
+    pipeline.submit(job_id, dest, "local")
+
+    if "application/json" in request.headers.get("accept", "").lower():
+        return {"jobs": [{"id": job_id, "url": dest}]}
     return RedirectResponse(url="/", status_code=303)
 
 

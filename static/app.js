@@ -176,12 +176,73 @@
         window.location.href = qs ? path + '?' + qs : path;
     };
 
+    window.doSemanticSearch = async function () {
+        const q = document.getElementById('search-input')?.value.trim() || '';
+        const panel = document.getElementById('semantic-results');
+        if (!panel) return;
+        const esc = function (s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        };
+        if (!q) { panel.hidden = true; panel.innerHTML = ''; return; }
+        panel.hidden = false;
+        panel.innerHTML = '<div class="semantic-empty">语义检索中…</div>';
+        try {
+            const resp = await fetch('/api/search/semantic?q=' + encodeURIComponent(q) + '&k=8');
+            const data = await resp.json();
+            if (!data.enabled) {
+                panel.innerHTML = '<div class="semantic-empty">' + esc(data.message || '语义检索未启用') + '</div>';
+                return;
+            }
+            if (!data.hits || !data.hits.length) {
+                panel.innerHTML = '<div class="semantic-empty">没有找到语义相关的内容</div>';
+                return;
+            }
+            const items = data.hits.map(function (h) {
+                const dist = (typeof h.distance === 'number') ? h.distance.toFixed(3) : '';
+                return '<a class="semantic-hit" href="/jobs/' + encodeURIComponent(h.job_id) + '">'
+                    + '<span class="semantic-hit-title">' + esc(h.title || h.job_id) + '</span>'
+                    + '<span class="semantic-hit-excerpt">' + esc(h.excerpt) + '</span>'
+                    + '<span class="semantic-hit-dist">距离 ' + dist + '</span>'
+                    + '</a>';
+            }).join('');
+            panel.innerHTML = '<div class="semantic-head">语义检索结果</div>' + items;
+        } catch (err) {
+            panel.innerHTML = '<div class="semantic-empty">检索失败：' + esc(err) + '</div>';
+        }
+    };
+
     document.getElementById('search-input')?.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') doSearch(window.location.pathname);
     });
 
     document.getElementById('platform-filter')?.addEventListener('change', function () {
         doSearch('/');
+    });
+
+    document.getElementById('btn-upload-local')?.addEventListener('click', async function () {
+        const input = document.getElementById('local-file-input');
+        const status = document.getElementById('upload-status');
+        const file = input && input.files ? input.files[0] : null;
+        if (!file) { if (status) status.textContent = '请先选择文件'; return; }
+        const btn = this;
+        btn.disabled = true;
+        if (status) status.textContent = '上传中…';
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const resp = await fetch('/api/jobs/upload', {
+                method: 'POST', body: fd, headers: { 'Accept': 'application/json' },
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            await resp.json();
+            if (status) status.textContent = '已创建任务，正在处理…';
+            window.location.href = '/';
+        } catch (err) {
+            if (status) status.textContent = '上传失败：' + err;
+            btn.disabled = false;
+        }
     });
 
     function formatTaskSeq(n) {

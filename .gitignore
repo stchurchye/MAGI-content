@@ -22,6 +22,7 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.venv-bench/
 
 # IDE
 .vscode/

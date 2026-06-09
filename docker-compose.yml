@@ -8,9 +8,10 @@ services:
       - .env
     environment:
       # YouTube 等外网需代理；与 docker-build.sh 默认一致，可在 .env 覆盖或置空关闭
-      HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
-      HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+      # 用 ${VAR-default}（无冒号）：仅当变量"未设置"时才用默认；.env 里写 HTTP_PROXY= 即可真正关代理
+      HTTP_PROXY: ${HTTP_PROXY-http://host.docker.internal:7890}
+      HTTPS_PROXY: ${HTTPS_PROXY-http://host.docker.internal:7890}
+      NO_PROXY: ${NO_PROXY-localhost,127.0.0.1,host.docker.internal}
     volumes:
       - ./storage:/app/storage
       - ./data:/app/data
