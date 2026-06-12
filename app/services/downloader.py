@@ -7,11 +7,14 @@ import shutil
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import yt_dlp
 
+from app.services.fingerprint import pick_user_agent, referer_for
 from app.services.platform_detector import PlatformRule
+from app.services.throttle import throttle
 
 
 def _build_ydl_opts(
@@ -32,12 +35,17 @@ def _build_ydl_opts(
         "socket_timeout": 30,
         "retries": 3,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Referer": "https://www.bilibili.com/",
+            # UA 从池中轮换取，避免所有 job 共用单一指纹
+            "User-Agent": pick_user_agent(),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         },
     }
+
+    # 按平台设置正确的 Referer；未知平台不设（修复此前固定 B站 Referer 的 bug）
+    referer = referer_for(platform_key)
+    if referer:
+        opts["http_headers"]["Referer"] = referer
 
     if proxy:
         opts["proxy"] = proxy
@@ -54,7 +62,7 @@ def _build_ydl_opts(
             "bilibili": {"prefer_multi_flv": True}
         }
     elif platform_key == "youtube":
-        opts["http_headers"]["Referer"] = "https://www.youtube.com/"
+        # Referer 已由 referer_for 统一设置，此处只配置 extractor_args
         opts.setdefault("extractor_args", {})["youtube"] = {
             "player_client": ["android", "web"],
         }
@@ -340,14 +348,109 @@ def download_gallerydl(
     }
 
 
-# ---------- 调度 ----------
+# ---------- 下载器插件注册表 ----------
 
-DOWNLOADERS = {
-    "ytdlp": download_ytdlp,
-    "yutto": download_yutto,
-    "gallerydl": download_gallerydl,
-    "xhs": "xhs",  # 由调度函数特殊处理
+
+@dataclass
+class DownloadContext:
+    """一次下载所需的全部上下文，传给下载器插件（统一签名，便于扩展）。"""
+    url: str
+    rule: PlatformRule
+    output_dir: str
+    job_id: str
+    logger: logging.Logger
+    progress_cb: Callable[[int, str], None]
+    cancel_event: Optional[threading.Event] = None
+    cookies_file: str = ""
+    cookies_from_browser: str = ""
+    xhs_cookie: str = ""
+    proxy: str = ""
+
+
+def _plugin_ytdlp(ctx: DownloadContext) -> dict:
+    return download_ytdlp(
+        ctx.url, ctx.output_dir, ctx.job_id, ctx.logger, ctx.progress_cb,
+        ctx.rule.key, ctx.cookies_file, ctx.cookies_from_browser, ctx.proxy,
+    )
+
+
+def _plugin_yutto(ctx: DownloadContext) -> dict:
+    from app.config import get_config
+    return download_yutto(
+        ctx.url, ctx.output_dir, ctx.job_id, ctx.logger, ctx.progress_cb,
+        ctx.cancel_event, timeout_sec=get_config().yutto_timeout_sec,
+    )
+
+
+def _plugin_gallerydl(ctx: DownloadContext) -> dict:
+    return download_gallerydl(
+        ctx.url, ctx.output_dir, ctx.job_id, ctx.logger, ctx.progress_cb, ctx.cancel_event,
+    )
+
+
+def _plugin_xhs(ctx: DownloadContext) -> dict:
+    from app.services.xhs_downloader import download_xhs
+    return download_xhs(
+        ctx.url, ctx.output_dir, logger=ctx.logger,
+        progress_cb=ctx.progress_cb, cookie=ctx.xhs_cookie,
+    )
+
+
+def _plugin_local(ctx: DownloadContext) -> dict:
+    """本地文件：跳过下载，按类型返回 video_path（视频/音频）或 images_dir（图片）。"""
+    from app.config import get_config
+    from app.services.ocr import IMAGE_EXTS  # 单一真源：避免图片扩展名集合漂移
+
+    path = ctx.url
+    if path.startswith("file://"):
+        path = path[len("file://"):]
+    if not os.path.isfile(path):
+        raise RuntimeError(f"本地文件不存在: {path}")
+
+    # 安全：仅允许 storage_dir 内的文件，挡任意本地文件读取(LFI)；realpath 解析符号链接逃逸
+    real = os.path.realpath(path)
+    root = os.path.realpath(get_config().storage_dir)
+    if not (real == root or real.startswith(root + os.sep)):
+        raise RuntimeError("本地文件必须位于上传目录内")
+
+    ext = os.path.splitext(path)[1].lower()
+    title = os.path.splitext(os.path.basename(path))[0]
+    ctx.logger.info("local | path=%s ext=%s", path, ext)
+    ctx.progress_cb(100, "使用本地文件")
+
+    if ext in IMAGE_EXTS:
+        images_dir = os.path.join(ctx.output_dir, "images")
+        os.makedirs(images_dir, exist_ok=True)
+        dst = os.path.join(images_dir, os.path.basename(path))
+        if os.path.abspath(dst) != os.path.abspath(path):
+            shutil.copy2(path, dst)
+        return {"images_dir": images_dir, "title": title, "duration_sec": None}
+
+    # 视频/音频：直接作为 video_path，交给 extract_audio（ffmpeg 对纯音频同样适用）
+    return {"video_path": path, "title": title, "duration_sec": None}
+
+
+# 下载器名 → 插件（统一接受 DownloadContext）。新增下载器登记一行即可。
+DOWNLOAD_PLUGINS: dict[str, Callable[["DownloadContext"], dict]] = {
+    "ytdlp": _plugin_ytdlp,
+    "yutto": _plugin_yutto,
+    "gallerydl": _plugin_gallerydl,
+    "xhs": _plugin_xhs,
+    "local": _plugin_local,
 }
+
+
+def register_downloader(name: str, fn: Callable[["DownloadContext"], dict]) -> None:
+    """注册自定义下载器插件（第三方扩展点）。"""
+    DOWNLOAD_PLUGINS[name] = fn
+
+
+def _dispatch(downloader: str, ctx: DownloadContext) -> dict:
+    """按名查表调用下载器插件（不含节流/降级逻辑）。"""
+    fn = DOWNLOAD_PLUGINS.get(downloader)
+    if fn is None:
+        raise ValueError(f"Unknown downloader: {downloader}")
+    return fn(ctx)
 
 
 def download(
@@ -366,24 +469,69 @@ def download(
 ) -> dict:
     """
     统一的下载入口。
+
+    - 发起下载前按平台 rate_limit 节流（整个 download 仅一次，不随降级重复）。
+    - 若主下载器抛异常且 rule.alt_downloader 存在且与主不同，则自动用备用下载器
+      重试一次（降级仅一层，避免无限递归）。用户主动取消不触发降级。
+      最终报错同时保留主/备两个下载器的原始异常信息。
     """
-    fn = DOWNLOADERS.get(downloader)
-    if fn is None:
+    if downloader not in DOWNLOAD_PLUGINS:
         raise ValueError(f"Unknown downloader: {downloader}")
 
-    if downloader == "xhs":
-        from app.services.xhs_downloader import download_xhs
-        return download_xhs(url, output_dir, logger=logger, progress_cb=progress_cb, cookie=xhs_cookie)
+    # 按平台频率限制：多任务并发打同一平台时拉开相邻请求间隔，降低被风控/限流误杀的概率。
+    # 节流发生在真正发起下载之前，按 rule.key 各自计时，不同平台互不阻塞；仅节流一次，
+    # 降级重试不再二次等待。
+    waited = throttle(rule.key, rule.rate_limit, cancel_event=cancel_event)
+    if waited > 0:
+        logger.info(
+            "throttle | platform=%s rate_limit=%s waited=%.2fs",
+            rule.key, rule.rate_limit, waited,
+        )
 
-    if downloader == "ytdlp":
-        return fn(
-            url, output_dir, job_id, logger, progress_cb,
-            rule.key, cookies_file, cookies_from_browser, proxy,
+    # 节流等待期间用户可能已取消（throttle 在取消时静默提前返回）。在发起真正的下载前
+    # 复查一次：ytdlp 路径一旦启动便不可中断，若不在此拦截，取消信号会在节流窗口后失效。
+    if cancel_event and cancel_event.is_set():
+        raise RuntimeError("User cancelled")
+
+    ctx = DownloadContext(
+        url=url, rule=rule, output_dir=output_dir, job_id=job_id,
+        logger=logger, progress_cb=progress_cb, cancel_event=cancel_event,
+        cookies_file=cookies_file, cookies_from_browser=cookies_from_browser,
+        xhs_cookie=xhs_cookie, proxy=proxy,
+    )
+
+    def _do(name: str) -> dict:
+        return _dispatch(name, ctx)
+
+    try:
+        return _do(downloader)
+    except Exception as primary_exc:  # 仅捕获业务异常；KeyboardInterrupt/SystemExit 直接上抛
+        alt = rule.alt_downloader
+        # 用户主动取消、备用为空、备用与主相同、或备用不在已知下载器集合 → 不降级，原样抛出
+        cancelled = bool(cancel_event and cancel_event.is_set())
+        if (
+            cancelled
+            or not alt
+            or alt == downloader
+            or alt not in DOWNLOAD_PLUGINS
+        ):
+            raise
+
+        logger.warning(
+            "主下载器失败，自动降级到备用下载器 | primary=%s alt=%s error=%s",
+            downloader, alt, primary_exc,
         )
-    if downloader == "yutto":
-        from app.config import get_config
-        return fn(
-            url, output_dir, job_id, logger, progress_cb, cancel_event,
-            timeout_sec=get_config().yutto_timeout_sec,
-        )
-    return fn(url, output_dir, job_id, logger, progress_cb, cancel_event)
+        try:
+            return _do(alt)
+        except Exception as alt_exc:  # 同上：系统级中断不在此吞掉
+            # 取消优先：备用路径中用户取消不再包装为降级失败
+            if cancel_event and cancel_event.is_set():
+                raise
+            logger.error(
+                "备用下载器也失败 | primary=%s alt=%s primary_error=%s alt_error=%s",
+                downloader, alt, primary_exc, alt_exc,
+            )
+            raise RuntimeError(
+                f"下载失败：主下载器 {downloader} 报错 [{primary_exc}]；"
+                f"备用下载器 {alt} 报错 [{alt_exc}]"
+            ) from alt_exc

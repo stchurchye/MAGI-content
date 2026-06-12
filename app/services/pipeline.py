@@ -303,21 +303,35 @@ class PipelineManager:
             # ---- Stage 3: 转录（视频）----
             if has_video:
                 cb(Stage.TRANSCRIBE, 30, ProgressMsg.TRANSCRIBE_START)
-                tr_result = transcribe_tingwu(
-                    audio_path=audio_path,
-                    output_dir=job_storage,
-                    job_id=job_id,
-                    api_key="",  # 不再使用 DashScope
-                    logger=job_logger,
-                    progress_cb=lambda p, m: cb(Stage.TRANSCRIBE, 30 + int(p * 0.50), m),
-                    poll_interval=cfg.tingwu_poll_interval,
-                    poll_timeout=cfg.tingwu_poll_timeout,
-                    app_key=cfg.tingwu_app_key,
-                    ak_id=cfg.alibaba_access_key_id,
-                    ak_secret=cfg.alibaba_access_key_secret,
-                    oss_endpoint=cfg.oss_endpoint,
-                    oss_bucket=cfg.oss_bucket,
-                )
+                tr_progress = lambda p, m: cb(Stage.TRANSCRIBE, 30 + int(p * 0.50), m)
+                if cfg.transcribe_backend == "whisper":
+                    from app.services.whisper_transcriber import transcribe_whisper
+                    tr_result = transcribe_whisper(
+                        audio_path=audio_path,
+                        output_dir=job_storage,
+                        job_id=job_id,
+                        logger=job_logger,
+                        progress_cb=tr_progress,
+                        model=cfg.whisper_model,
+                        device=cfg.whisper_device,
+                        compute_type=cfg.whisper_compute_type,
+                    )
+                else:
+                    tr_result = transcribe_tingwu(
+                        audio_path=audio_path,
+                        output_dir=job_storage,
+                        job_id=job_id,
+                        api_key="",  # 不再使用 DashScope
+                        logger=job_logger,
+                        progress_cb=tr_progress,
+                        poll_interval=cfg.tingwu_poll_interval,
+                        poll_timeout=cfg.tingwu_poll_timeout,
+                        app_key=cfg.tingwu_app_key,
+                        ak_id=cfg.alibaba_access_key_id,
+                        ak_secret=cfg.alibaba_access_key_secret,
+                        oss_endpoint=cfg.oss_endpoint,
+                        oss_bucket=cfg.oss_bucket,
+                    )
                 update_job_fields(conn, job_id,
                                   transcript_path=tr_result["transcript_path"],
                                   transcript_text=tr_result["transcript_text"])
@@ -336,9 +350,6 @@ class PipelineManager:
                         title=title,
                         output_dir=job_storage,
                         job_id=job_id,
-                        api_key=cfg.deepseek_api_key,
-                        model=cfg.deepseek_model,
-                        max_tokens=cfg.deepseek_max_tokens,
                         logger=job_logger,
                         progress_cb=lambda p, m: cb(Stage.SUMMARIZE, 80 + int(p * 0.20), m),
                         media_type="video",
@@ -382,13 +393,11 @@ class PipelineManager:
                         title=title,
                         output_dir=job_storage,
                         job_id=job_id,
-                        api_key=cfg.deepseek_api_key,
-                        model=cfg.deepseek_model,
-                        max_tokens=cfg.deepseek_max_tokens,
                         logger=job_logger,
                         progress_cb=lambda p, m: cb(Stage.SUMMARIZE, 80 + int(p * 0.20), m),
                         media_type="image_text",
                         image_count=len(ocr_result["results"]),
+                        images=list_image_files(dl_result["images_dir"]),
                     )
                     update_job_fields(
                         conn,
@@ -424,6 +433,18 @@ class PipelineManager:
                     job_logger.info("MAGI export written: %s", magi_path)
             except Exception:
                 job_logger.warning("MAGI export failed (non-fatal)", exc_info=True)
+
+            # 向量索引：跨任务语义检索（best-effort，未配置 embedder 时自动跳过）
+            try:
+                from app.services.vectorstore import get_vector_store
+                vs = get_vector_store()
+                if vs.enabled:
+                    idx_text = (job_row or {}).get("summary_text") or \
+                        (job_row or {}).get("transcript_text") or ""
+                    if idx_text and vs.index(job_id, idx_text, title=title):
+                        job_logger.info("向量索引完成 | job_id=%s", job_id)
+            except Exception:
+                job_logger.warning("向量索引失败 (non-fatal)", exc_info=True)
 
             update_job_status(conn, job_id, JobStatus.COMPLETED.value, None, 100)
             conn.commit()

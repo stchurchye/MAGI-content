@@ -11,6 +11,62 @@ _log = logging.getLogger("app.xhs_cookie")
 
 _XHS_DOMAINS = ("xiaohongshu.com", "www.xiaohongshu.com", ".xiaohongshu.com")
 
+# 小红书登录态相关的 Cookie 关键字段：
+# - web_session: 登录会话令牌，是否处于登录态的核心标志
+# - a1 / webId: 设备指纹字段，登录后通常成对出现
+_XHS_SESSION_KEY = "web_session"
+_XHS_DEVICE_KEYS = ("a1", "webId")
+# 经验阈值：有效的小红书 Cookie（含登录态）通常远超此长度，过短基本可判定无效
+_XHS_COOKIE_MIN_LEN = 64
+
+
+def _cookie_field_names(cookie: str) -> set[str]:
+    """从 Cookie 字符串中提取出现过的字段名集合（仅解析，不发网络请求）。
+
+    兼容两种常见格式：
+    - HTTP 请求头风格: "a1=xxx; web_session=yyy; webId=zzz"
+    - 仅以分号或换行分隔的键值对
+    """
+    names: set[str] = set()
+    # 同时按分号与换行切分，逐段取 "=" 左侧作为字段名
+    for chunk in cookie.replace("\n", ";").split(";"):
+        chunk = chunk.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        name = chunk.split("=", 1)[0].strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def validate_xhs_cookie(cookie: str) -> tuple[bool, str]:
+    """对小红书 Cookie 做轻量结构性校验（纯函数，不发任何网络请求）。
+
+    返回 (ok, reason)：ok 为 True 时 reason 为 "ok"；
+    ok 为 False 时 reason 给出可读的失效原因，供调用方记录预警日志。
+
+    注意：本函数只能判定 "结构上不像有效登录态"，无法保证服务端仍认可该 Cookie；
+    真正的过期仍可能在下载时才暴露。其价值在于尽早拦截空 / 残缺 / 未登录的 Cookie。
+    """
+    if not cookie or not cookie.strip():
+        return False, "Cookie 为空"
+
+    cookie = cookie.strip()
+    if len(cookie) < _XHS_COOKIE_MIN_LEN:
+        return False, f"Cookie 长度过短（{len(cookie)} < {_XHS_COOKIE_MIN_LEN}），疑似不完整"
+
+    names = _cookie_field_names(cookie)
+    if not names:
+        return False, "无法解析出任何 Cookie 字段（格式异常）"
+
+    if _XHS_SESSION_KEY not in names:
+        return False, f"缺少登录态字段 {_XHS_SESSION_KEY}，可能未登录或已退出"
+
+    if not any(k in names for k in _XHS_DEVICE_KEYS):
+        return False, f"缺少设备指纹字段 {'/'.join(_XHS_DEVICE_KEYS)}，疑似 Cookie 不完整"
+
+    return True, "ok"
+
 
 def _in_docker() -> bool:
     return os.path.exists("/.dockerenv")
@@ -58,6 +114,18 @@ def _read_from_browser(browser: str) -> str:
     return cookie or ""
 
 
+def _warn_if_invalid(cookie: str, *, source: str) -> bool:
+    """对已解析到的 Cookie 做结构性校验，失效时输出明确的预警日志。
+
+    返回 ok（是否通过校验），便于调用方按需进一步处理；当前调用方仅用于预警，
+    不阻断流程。
+    """
+    ok, reason = validate_xhs_cookie(cookie)
+    if not ok:
+        _log.warning("Cookie 可能已失效: %s | 来源=%s", reason, source)
+    return ok
+
+
 def resolve_xhs_cookie(cfg: Config) -> str:
     """
     解析小红书 Cookie，优先级：
@@ -66,10 +134,13 @@ def resolve_xhs_cookie(cfg: Config) -> str:
     3. 本机从浏览器读取（Chrome/Safari 等，Docker 内通常不可用）
     """
     if cfg.xhs_cookie:
-        return cfg.xhs_cookie.strip()
+        cookie = cfg.xhs_cookie.strip()
+        _warn_if_invalid(cookie, source="XHS_COOKIE 环境变量")
+        return cookie
 
     from_file = _read_cookie_file(cfg.xhs_cookie_file)
     if from_file:
+        _warn_if_invalid(from_file, source=f"文件 {cfg.xhs_cookie_file}")
         return from_file
 
     browser = cfg.xhs_cookie_from_browser or _default_browser()
@@ -88,4 +159,6 @@ def resolve_xhs_cookie(cfg: Config) -> str:
             "请先在浏览器登录 xiaohongshu.com，或设置 XHS_COOKIE",
             browser,
         )
+    else:
+        _warn_if_invalid(cookie, source=f"浏览器 {browser}")
     return cookie

@@ -1,6 +1,7 @@
 """平台检测 + 平台规则配置 + URL 规范化。"""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -72,6 +73,69 @@ PLATFORM_RULES: dict[str, PlatformRule] = {
         needs_cookie="optional",
         note="部分视频需要日本 IP + 登录",
     ),
+    "weibo": PlatformRule(
+        key="weibo",
+        name="微博",
+        domains=["weibo.com", "m.weibo.cn", "weibo.cn", "video.weibo.com"],
+        default_downloader="ytdlp",
+        alt_downloader="gallerydl",
+        strictness="medium",
+        needs_cookie="optional",
+        rate_limit="moderate",
+        note="视频走 yt-dlp，图文/九宫格自动降级 gallery-dl（其 weibo 支持较好）",
+    ),
+    "kuaishou": PlatformRule(
+        key="kuaishou",
+        name="快手",
+        domains=["kuaishou.com", "www.kuaishou.com", "v.kuaishou.com"],
+        default_downloader="ytdlp",
+        alt_downloader="gallerydl",
+        strictness="high",
+        needs_cookie="optional",
+        rate_limit="moderate",
+        note="反爬较严，公开视频多数可下；失败自动降级 gallery-dl，稳定下载可能需 cookie",
+    ),
+    "instagram": PlatformRule(
+        key="instagram",
+        name="Instagram",
+        domains=["instagram.com", "www.instagram.com", "instagr.am"],
+        default_downloader="ytdlp",
+        alt_downloader="gallerydl",
+        media_type="video",
+        strictness="high",
+        needs_cookie="optional",
+        needs_proxy="optional",
+        note="多数内容需登录 cookie；图片帖可降级 gallery-dl；大陆需代理",
+    ),
+    "tiktok": PlatformRule(
+        key="tiktok",
+        name="TikTok",
+        domains=["tiktok.com", "www.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"],
+        default_downloader="ytdlp",
+        strictness="medium",
+        needs_proxy="optional",
+        note="yt-dlp 原生支持；大陆需代理，部分内容受地区限制",
+    ),
+    "twitter": PlatformRule(
+        key="twitter",
+        name="X (Twitter)",
+        domains=["twitter.com", "x.com", "mobile.twitter.com", "fxtwitter.com"],
+        default_downloader="ytdlp",
+        strictness="medium",
+        needs_cookie="optional",
+        needs_proxy="optional",
+        note="yt-dlp 原生支持；年龄/受限内容需 cookie，地区限制可能需代理",
+    ),
+    "local": PlatformRule(
+        key="local",
+        name="本地文件",
+        domains=[],
+        default_downloader="local",
+        media_type="video",  # 实际 video/image_text 由 local 下载器按文件类型决定
+        strictness="low",
+        needs_cookie="none",
+        note="本地上传/本地路径的视频/音频/图片，跳过下载直接进入处理流水线",
+    ),
     "generic": PlatformRule(
         key="generic",
         name="通用",
@@ -83,9 +147,34 @@ PLATFORM_RULES: dict[str, PlatformRule] = {
 }
 
 
+def _local_root() -> str:
+    """允许的本地文件根目录（仅上传存储目录），realpath 以解析符号链接。"""
+    from app.config import get_config
+    return os.path.realpath(get_config().storage_dir)
+
+
+def _is_local_input(s: str) -> bool:
+    """是否为受信的本地文件：必须是真实文件，且解析后位于 storage_dir 之内。
+
+    安全要点：只接受上传目录内的文件，拒绝 /etc/passwd、~/.ssh 等任意绝对路径，
+    避免公开 url 字段被用于任意本地文件读取(LFI)。realpath 同时挡住符号链接逃逸。
+    """
+    if s.startswith("file://"):
+        s = s[len("file://"):]
+    elif not s.startswith("/"):
+        return False
+    if not os.path.isfile(s):
+        return False
+    real = os.path.realpath(s)
+    root = _local_root()
+    return real == root or real.startswith(root + os.sep)
+
+
 def normalize_url(url: str, rule: PlatformRule) -> str:
     """将分享/短链接转成下载器需要的标准格式。"""
     cleaned = url.strip()
+    if rule.key == "local":
+        return cleaned[len("file://"):] if cleaned.startswith("file://") else cleaned
     if cleaned and "://" not in cleaned:
         cleaned = "https://" + cleaned
     parsed = urlparse(cleaned)
@@ -115,6 +204,10 @@ def normalize_url(url: str, rule: PlatformRule) -> str:
         # 去除全部追踪参数，只保留路径中的 BV 号
         return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
 
+    if rule.key == "twitter":
+        # 去掉 ?s=20 等追踪参数，只保留 /user/status/id 路径
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
     return cleaned
 
 
@@ -125,6 +218,8 @@ def detect_platform(url: str) -> tuple[PlatformRule, str]:
     匹配方式: 'domain' | 'generic'
     """
     cleaned = url.strip()
+    if _is_local_input(cleaned):
+        return PLATFORM_RULES["local"], "local"
     if cleaned and "://" not in cleaned:
         cleaned = "https://" + cleaned
 

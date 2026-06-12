@@ -77,6 +77,39 @@ class Config:
         )
 
     @property
+    def proxy_pool(self) -> list[str]:
+        """代理池：从 PROXY_POOL 读逗号分隔的代理列表，供后续代理轮换使用。
+
+        示例：PROXY_POOL=http://127.0.0.1:7890,socks5://127.0.0.1:1080
+        返回去空、去首尾空白后的代理 URL 列表；未配置则为空列表。
+        """
+        raw = os.environ.get("PROXY_POOL", "")
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    @property
+    def rate_limit_aggressive_sec(self) -> float:
+        """激进节流间隔（秒），对应 PlatformRule.rate_limit == 'aggressive'（抖音/小红书）。"""
+        return self._read_float("RATE_LIMIT_AGGRESSIVE_SEC", 6.0)
+
+    @property
+    def rate_limit_moderate_sec(self) -> float:
+        """温和节流间隔（秒），对应 PlatformRule.rate_limit == 'moderate'（B站）。"""
+        return self._read_float("RATE_LIMIT_MODERATE_SEC", 2.0)
+
+    @property
+    def user_agent_override(self) -> str:
+        """可选 User-Agent 覆盖：USER_AGENT 非空时覆盖 fingerprint 模块的 UA 池。"""
+        return os.environ.get("USER_AGENT", "").strip()
+
+    @staticmethod
+    def _read_float(key: str, default: float) -> float:
+        """读取浮点环境变量，解析失败时回退到默认值（避免脏配置导致崩溃）。"""
+        try:
+            return float(os.environ.get(key, str(default)))
+        except (TypeError, ValueError):
+            return default
+
+    @property
     def xhs_cookie(self) -> str:
         """小红书网页版 Cookie（手动配置，优先级最高）"""
         return os.environ.get("XHS_COOKIE", "")
@@ -106,6 +139,14 @@ class Config:
         """已归档任务存储保留天数，0 表示不自动清理"""
         return int(os.environ.get("STORAGE_RETENTION_DAYS", "30"))
 
+    @property
+    def max_upload_mb(self) -> int:
+        """本地文件上传大小上限（MB），防止超大文件耗尽磁盘。"""
+        try:
+            return int(os.environ.get("MAX_UPLOAD_MB", "2048"))
+        except (TypeError, ValueError):
+            return 2048
+
     # ---- 重试 ----
     max_retry_count: int = 3
 
@@ -125,9 +166,47 @@ class Config:
     deepseek_model: str = "deepseek-chat"
     deepseek_max_tokens: int = 4096
 
+    # ---- 摘要引擎（可插拔）----
+    @property
+    def summary_engine(self) -> str:
+        """摘要引擎名：deepseek（默认，保持现状）/ claude / qwen / minimax 等。
+
+        见 app/services/engines。切换只需改 SUMMARY_ENGINE 环境变量，无需改代码。
+        """
+        return os.environ.get("SUMMARY_ENGINE", "deepseek").strip() or "deepseek"
+
+    @property
+    def summary_chunk_chars(self) -> int:
+        """长文本 map-reduce 的分块大小（字符）。内容超过引擎容量时按此切块。"""
+        try:
+            return int(os.environ.get("SUMMARY_CHUNK_CHARS", "80000"))
+        except (TypeError, ValueError):
+            return 80_000
+
     # ---- 通义听悟 ----
     tingwu_poll_interval: int = 5
     tingwu_poll_timeout: int = 7200
+
+    # ---- 转录后端 ----
+    @property
+    def transcribe_backend(self) -> str:
+        """转录后端：tingwu（默认，云端）或 whisper（本地 faster-whisper）。"""
+        return os.environ.get("TRANSCRIBE_BACKEND", "tingwu")
+
+    @property
+    def whisper_model(self) -> str:
+        """faster-whisper 模型：tiny / base / small / medium / large-v3。"""
+        return os.environ.get("WHISPER_MODEL", "small")
+
+    @property
+    def whisper_device(self) -> str:
+        """运行设备：cpu / cuda。"""
+        return os.environ.get("WHISPER_DEVICE", "cpu")
+
+    @property
+    def whisper_compute_type(self) -> str:
+        """量化类型：int8（CPU）/ float16（GPU）。"""
+        return os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
 
     # ---- Web ----
     host: str = "127.0.0.1"

@@ -30,11 +30,13 @@
                     {% endfor %}
                 </select>
                 <button type="button" class="magi-btn solid btn-sm" data-sfx="click" onclick="doSearch()">搜索</button>
+                <button type="button" class="magi-btn ghost btn-sm" data-sfx="click" onclick="doSemanticSearch()" title="按语义跨任务检索（需配置 EMBEDDING_BACKEND）">语义检索</button>
                 {% if query or platform_filter %}
                 <a href="/" class="magi-btn ghost btn-sm">清除</a>
                 {% endif %}
             </div>
         </div>
+        <div id="semantic-results" class="semantic-results" hidden></div>
 
         <div class="home-sidebar-scroll">
             <section class="section section-compact" id="active-section"{% if not active_jobs %} hidden{% endif %}>
@@ -152,6 +154,17 @@
                     </div>
                 </details>
             </form>
+            <details class="hero-more" id="upload-panel" aria-label="本地文件">
+                <summary class="hero-more-summary">上传本地文件 <span class="hero-more-hint">视频/音频/图片，跳过下载直接处理</span></summary>
+                <div class="hero-more-body">
+                    <div class="cookie-actions upload-actions">
+                        <input type="file" id="local-file-input" class="magi-input upload-file-input"
+                               accept="video/*,audio/*,image/*">
+                        <button type="button" class="magi-btn solid btn-sm" id="btn-upload-local" data-sfx="confirm">上传并处理</button>
+                    </div>
+                    <p class="hero-more-hint" id="upload-status" aria-live="polite"></p>
+                </div>
+            </details>
         </section>
     </div>
 </div>
