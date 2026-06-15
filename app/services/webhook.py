@@ -1,0 +1,45 @@
+"""完成回调 webhook：作业进入终态(completed/failed)时,POST 通知外部接收端。
+
+注册为 PipelineManager 的全局 SSE 订阅者(subscribe_to_all)。轻量「ping」语义:
+只发 {job_id, status},接收端凭 job_id 回拉详情(GET /api/jobs/{id})。best-effort —
+任何异常都吞掉并记日志,绝不影响流水线主流程。
+"""
+import logging
+
+import requests
+
+logger = logging.getLogger("app")
+
+# 仅终态才回调(进行中的进度事件不发,避免噪音)。
+_TERMINAL_EVENTS = {"completed", "failed"}
+
+
+def make_webhook_subscriber(webhook_url: str, webhook_token: str = "", *, poster=None, timeout: int = 10):
+    """构造一个 (job_id, event, data) 回调:终态时 POST {job_id, status} 到 webhook_url。
+
+    poster 可注入(默认 requests.post)便于测试。
+    """
+    post = poster or requests.post
+
+    def _on_event(job_id: str, event: str, data: dict) -> None:
+        if event not in _TERMINAL_EVENTS:
+            return
+        headers = {"Content-Type": "application/json"}
+        if webhook_token:
+            headers["Authorization"] = f"Bearer {webhook_token}"
+        try:
+            post(
+                webhook_url,
+                json={"job_id": job_id, "status": event},
+                headers=headers,
+                timeout=timeout,
+            )
+            logger.info("webhook 已发送 | job_id=%s status=%s", job_id, event)
+        except Exception:
+            # best-effort:回调失败不回滚作业,只记日志(接收端也可改用轮询兜底)。
+            logger.warning(
+                "webhook POST 失败 | job_id=%s status=%s url=%s",
+                job_id, event, webhook_url, exc_info=True,
+            )
+
+    return _on_event

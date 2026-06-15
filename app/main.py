@@ -82,6 +82,16 @@ def create_app() -> FastAPI:
         app.add_middleware(TokenAuthMiddleware)
         logger.info("Token auth enabled")
 
+    # 完成回调 webhook（可选）：作业终态时 POST 通知外部接收端（如 agent）。
+    if config.webhook_url:
+        from app.services.pipeline import get_pipeline_manager
+        from app.services.webhook import make_webhook_subscriber
+
+        get_pipeline_manager().subscribe_to_all(
+            make_webhook_subscriber(config.webhook_url, config.webhook_token)
+        )
+        logger.info("完成回调 webhook 已启用 → %s", config.webhook_url)
+
     # 注册路由
     from app.routes.api import router as api_router
     app.include_router(api_router)
