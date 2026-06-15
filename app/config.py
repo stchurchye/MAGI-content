@@ -133,6 +133,17 @@ class Config:
         """可选的 Bearer Token 认证，为空则不启用"""
         return os.environ.get("AUTH_TOKEN", "")
 
+    # ---- 完成回调 webhook ----
+    @property
+    def webhook_url(self) -> str:
+        """作业完成/失败后 POST 通知的 URL（如 agent 的 /api/magi-content/callback）。为空则不启用。"""
+        return os.environ.get("WEBHOOK_URL", "").strip()
+
+    @property
+    def webhook_token(self) -> str:
+        """webhook 的 Bearer token（与接收端共享）。为空则 POST 不带 Authorization。"""
+        return os.environ.get("WEBHOOK_TOKEN", "")
+
     # ---- 存储清理 ----
     @property
     def storage_retention_days(self) -> int:
