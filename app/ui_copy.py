@@ -40,6 +40,14 @@ STAGE_TIMELINE_IMAGE: list[tuple[str, str, int]] = [
     ("summarizing", "生成摘要", 100),
 ]
 
+# 文本（公众号/HTML 文章）：抓取正文后直接摘要，无音频/OCR
+STAGE_TIMELINE_TEXT: list[tuple[str, str, int]] = [
+    ("detecting", "平台检测", 5),
+    ("downloading", "抓取文章", 25),
+    ("transcribing", "抽取正文", 80),
+    ("summarizing", "生成摘要", 100),
+]
+
 # ---- 下载器选项（value 不变，仅展示）----
 DOWNLOADER_OPTIONS: list[tuple[str, str]] = [
     ("auto", "自动选择"),
@@ -47,6 +55,7 @@ DOWNLOADER_OPTIONS: list[tuple[str, str]] = [
     ("yutto", "B站（yutto · 弹幕/AI 字幕）"),
     ("xhs", "小红书（XHS-Downloader）"),
     ("gallerydl", "gallery-dl"),
+    ("wechat", "公众号（正文抽取）"),
 ]
 
 DOWNLOADER_LABELS: dict[str, str] = dict(DOWNLOADER_OPTIONS)
@@ -57,6 +66,9 @@ PLATFORM_FILTER_OPTIONS: list[tuple[str, str]] = [
     ("bilibili", "B站"),
     ("youtube", "YouTube"),
     ("xiaohongshu", "小红书"),
+    ("weibo", "微博"),
+    ("twitter", "X (Twitter)"),
+    ("wechat", "公众号"),
     ("douyin", "抖音"),
     ("nicovideo", "N站"),
     ("generic", "通用"),
@@ -148,6 +160,8 @@ def downloader_label(downloader: str | None) -> str:
 def timeline_for_media_type(media_type: str) -> Sequence[tuple[str, str, int]]:
     if media_type == "image_text":
         return STAGE_TIMELINE_IMAGE
+    if media_type == "text":
+        return STAGE_TIMELINE_TEXT
     return STAGE_TIMELINE_VIDEO
 
 

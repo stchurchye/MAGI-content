@@ -283,9 +283,23 @@ class PipelineManager:
                 dl_result.get("images_dir")
                 and list_image_files(dl_result["images_dir"])
             )
+            # 公众号/HTML 文章：下载器已抽好正文，走文本分支直达摘要
+            article_text = (dl_result.get("article_text") or "").strip()
 
-            # ---- Stage 2: 提取音频（视频笔记或含视频文件）----
-            if has_video:
+            # 平台自带字幕优先：B站 AI 字幕 / YouTube 官方·自动字幕，命中即复用为转写文本，
+            # 跳过本地 whisper 重转写（质量更高、更快）。无字幕则照常提取音频转写。
+            subtitle_text = ""
+            if has_video and cfg.subtitle_reuse:
+                from app.services.subtitles import parse_subtitle_file
+                subtitle_text = parse_subtitle_file(dl_result.get("subtitle_path") or "")
+                if len(subtitle_text) < 10:
+                    subtitle_text = ""
+                elif dl_result.get("subtitle_path"):
+                    job_logger.info("复用平台字幕 | chars=%d path=%s",
+                                    len(subtitle_text), dl_result["subtitle_path"])
+
+            # ---- Stage 2: 提取音频（视频且无可复用字幕时）----
+            if has_video and not subtitle_text:
                 cb(Stage.EXTRACT, 25, ProgressMsg.EXTRACT_START)
                 audio_path = extract_audio(
                     video_path=dl_result["video_path"],
@@ -302,41 +316,53 @@ class PipelineManager:
 
             # ---- Stage 3: 转录（视频）----
             if has_video:
-                cb(Stage.TRANSCRIBE, 30, ProgressMsg.TRANSCRIBE_START)
-                tr_progress = lambda p, m: cb(Stage.TRANSCRIBE, 30 + int(p * 0.50), m)
-                if cfg.transcribe_backend == "whisper":
-                    from app.services.whisper_transcriber import transcribe_whisper
-                    tr_result = transcribe_whisper(
-                        audio_path=audio_path,
-                        output_dir=job_storage,
-                        job_id=job_id,
-                        logger=job_logger,
-                        progress_cb=tr_progress,
-                        model=cfg.whisper_model,
-                        device=cfg.whisper_device,
-                        compute_type=cfg.whisper_compute_type,
-                    )
+                if subtitle_text:
+                    # 复用平台自带字幕，跳过本地 whisper 重转写
+                    transcript_text = subtitle_text
+                    transcript_path = os.path.join(job_storage, f"{job_id}.txt")
+                    with open(transcript_path, "w", encoding="utf-8") as f:
+                        f.write(transcript_text)
+                    update_job_fields(conn, job_id,
+                                      transcript_path=transcript_path,
+                                      transcript_text=transcript_text)
+                    cb(Stage.TRANSCRIBE, 80, f"已复用平台字幕 ({len(transcript_text)} 字)")
                 else:
-                    tr_result = transcribe_tingwu(
-                        audio_path=audio_path,
-                        output_dir=job_storage,
-                        job_id=job_id,
-                        api_key="",  # 不再使用 DashScope
-                        logger=job_logger,
-                        progress_cb=tr_progress,
-                        poll_interval=cfg.tingwu_poll_interval,
-                        poll_timeout=cfg.tingwu_poll_timeout,
-                        app_key=cfg.tingwu_app_key,
-                        ak_id=cfg.alibaba_access_key_id,
-                        ak_secret=cfg.alibaba_access_key_secret,
-                        oss_endpoint=cfg.oss_endpoint,
-                        oss_bucket=cfg.oss_bucket,
-                    )
-                update_job_fields(conn, job_id,
-                                  transcript_path=tr_result["transcript_path"],
-                                  transcript_text=tr_result["transcript_text"])
-                transcript_text = tr_result["transcript_text"]
-                cb(Stage.TRANSCRIBE, 80, f"{ProgressMsg.TRANSCRIBE_DONE} ({len(transcript_text)} 字)")
+                    cb(Stage.TRANSCRIBE, 30, ProgressMsg.TRANSCRIBE_START)
+                    tr_progress = lambda p, m: cb(Stage.TRANSCRIBE, 30 + int(p * 0.50), m)
+                    if cfg.transcribe_backend == "whisper":
+                        from app.services.whisper_transcriber import transcribe_whisper
+                        tr_result = transcribe_whisper(
+                            audio_path=audio_path,
+                            output_dir=job_storage,
+                            job_id=job_id,
+                            logger=job_logger,
+                            progress_cb=tr_progress,
+                            model=cfg.whisper_model,
+                            device=cfg.whisper_device,
+                            compute_type=cfg.whisper_compute_type,
+                            language=cfg.transcribe_language or None,
+                        )
+                    else:
+                        tr_result = transcribe_tingwu(
+                            audio_path=audio_path,
+                            output_dir=job_storage,
+                            job_id=job_id,
+                            api_key="",  # 不再使用 DashScope
+                            logger=job_logger,
+                            progress_cb=tr_progress,
+                            poll_interval=cfg.tingwu_poll_interval,
+                            poll_timeout=cfg.tingwu_poll_timeout,
+                            app_key=cfg.tingwu_app_key,
+                            ak_id=cfg.alibaba_access_key_id,
+                            ak_secret=cfg.alibaba_access_key_secret,
+                            oss_endpoint=cfg.oss_endpoint,
+                            oss_bucket=cfg.oss_bucket,
+                        )
+                    update_job_fields(conn, job_id,
+                                      transcript_path=tr_result["transcript_path"],
+                                      transcript_text=tr_result["transcript_text"])
+                    transcript_text = tr_result["transcript_text"]
+                    cb(Stage.TRANSCRIBE, 80, f"{ProgressMsg.TRANSCRIBE_DONE} ({len(transcript_text)} 字)")
 
                 # ---- Stage 4: 摘要 ----
                 if not transcript_text.strip():
@@ -405,10 +431,38 @@ class PipelineManager:
                         summary_path=result.summary_path,
                         summary_text=result.summary_display,
                     )
+            elif article_text:
+                # ---- 文本分支：公众号/HTML 文章正文直接进摘要 ----
+                transcript_path = os.path.join(job_storage, f"{job_id}.txt")
+                with open(transcript_path, "w", encoding="utf-8") as f:
+                    f.write(article_text)
+                update_job_fields(conn, job_id,
+                                  transcript_path=transcript_path,
+                                  transcript_text=article_text)
+                cb(Stage.TRANSCRIBE, 80, f"已抽取正文 ({len(article_text)} 字)")
+
+                if is_cancelled(): raise RuntimeError("User cancelled")
+
+                cb(Stage.SUMMARIZE, 80, ProgressMsg.SUMMARIZE_START)
+                result = summarize(
+                    transcript_text=article_text,
+                    title=title,
+                    output_dir=job_storage,
+                    job_id=job_id,
+                    logger=job_logger,
+                    progress_cb=lambda p, m: cb(Stage.SUMMARIZE, 80 + int(p * 0.20), m),
+                    media_type="video",
+                )
+                update_job_fields(
+                    conn,
+                    job_id,
+                    summary_path=result.summary_path,
+                    summary_text=result.summary_display,
+                )
             else:
                 raise RuntimeError(
-                    "下载完成但未找到可处理的图片或视频。"
-                    "若为小红书链接，请同步 Cookie 后重试。"
+                    "下载完成但未找到可处理的内容（视频/图片/正文）。"
+                    "小红书链接请同步 Cookie 后重试；公众号等图文文章请确认是可公开访问的链接。"
                 )
 
             # ---- 完成 ----

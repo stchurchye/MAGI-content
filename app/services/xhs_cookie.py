@@ -131,7 +131,10 @@ def resolve_xhs_cookie(cfg: Config) -> str:
     解析小红书 Cookie，优先级：
     1. XHS_COOKIE 环境变量
     2. XHS_COOKIE_FILE / data/xhs_cookie.txt
-    3. 本机从浏览器读取（Chrome/Safari 等，Docker 内通常不可用）
+    3. 本机从浏览器读取——仅当显式设置 XHS_COOKIE_FROM_BROWSER / COOKIES_FROM_BROWSER 时
+       才进行（隐私默认：不自动读取本机浏览器登录态，避免“没配 Cookie 却带上你的小红书账号”）。
+
+    注意：手动同步脚本 sync_xhs_cookie() 是另一条显式路径，仍按 _default_browser() 默认 chrome。
     """
     if cfg.xhs_cookie:
         cookie = cfg.xhs_cookie.strip()
@@ -143,7 +146,16 @@ def resolve_xhs_cookie(cfg: Config) -> str:
         _warn_if_invalid(from_file, source=f"文件 {cfg.xhs_cookie_file}")
         return from_file
 
-    browser = cfg.xhs_cookie_from_browser or _default_browser()
+    # 浏览器读取改为显式 opt-in：cfg.xhs_cookie_from_browser 为空（未设
+    # XHS_COOKIE_FROM_BROWSER / COOKIES_FROM_BROWSER）时直接跳过，不再隐式默认读 chrome。
+    browser = cfg.xhs_cookie_from_browser
+    if not browser:
+        _log.info(
+            "未配置 XHS_COOKIE / Cookie 文件，且未显式开启浏览器读取，按隐私默认跳过自动读取"
+            "（如需用本机浏览器登录态，设 XHS_COOKIE_FROM_BROWSER=chrome，或跑 ./scripts/sync-xhs-cookie.sh）"
+        )
+        return ""
+
     if _in_docker():
         _log.warning(
             "Docker 内无法直接读取宿主机浏览器 Cookie；"

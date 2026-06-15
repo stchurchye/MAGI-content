@@ -76,6 +76,7 @@ _REFERER_MAP: dict[str, str] = {
     "kuaishou": "https://www.kuaishou.com/",
     "instagram": "https://www.instagram.com/",
     "tiktok": "https://www.tiktok.com/",
+    "wechat": "https://mp.weixin.qq.com/",
 }
 
 

@@ -351,6 +351,10 @@ async def create_job(
     downloader: str = Form("auto"),
 ):
     """创建新任务。支持批量（每行一个 URL）。始终回到首页。"""
+    from app.services.downloader import DOWNLOAD_PLUGINS
+    if downloader not in ({"auto"} | set(DOWNLOAD_PLUGINS)):
+        raise HTTPException(status_code=400, detail=f"未知下载器: {downloader}")
+
     cfg = get_config()
     pipeline = get_pipeline_manager()
     conn = get_db(cfg.db_path)

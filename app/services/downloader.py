@@ -25,6 +25,7 @@ def _build_ydl_opts(
     cookies_from_browser: str = "",
     proxy: str = "",
 ) -> dict:
+    from app.config import get_config
     opts = {
         "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "merge_output_format": "mp4",
@@ -34,6 +35,14 @@ def _build_ydl_opts(
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 3,
+        # 顺带拉取官方字幕（YouTube 等）：命中即被流水线复用为 transcript，免去本地
+        # 重转写。自动生成字幕默认不取（机翻/ASR 质量常不及 whisper，且可能串语种），
+        # 由 SUBTITLE_USE_AUTOCAPTION 控制。无字幕的平台不受影响（不报错、不阻断下载）。
+        "writesubtitles": True,
+        "writeautomaticsub": get_config().subtitle_use_autocaption,
+        "subtitleslangs": ["zh-Hans", "zh-Hant", "zh", "zh-CN", "en", "en-US"],
+        # 只取可解析格式；去掉 /best 兜底，避免下到 find_subtitle_file 不认的 json3/ttml/srv
+        "subtitlesformat": "srt/vtt",
         "http_headers": {
             # UA 从池中轮换取，避免所有 job 共用单一指纹
             "User-Agent": pick_user_agent(),
@@ -140,10 +149,16 @@ def download_ytdlp(
         duration = info.get("duration")
         logger.info("yt-dlp done | title=%s duration=%s path=%s", title, duration, video_path)
 
+        from app.services.subtitles import find_subtitle_file
+        subtitle_path = find_subtitle_file(output_dir)
+        if subtitle_path:
+            logger.info("yt-dlp subtitle found | path=%s", subtitle_path)
+
         return {
             "video_path": video_path,
             "title": title,
             "duration_sec": duration,
+            "subtitle_path": subtitle_path,
         }
 
 
@@ -211,8 +226,14 @@ def download_yutto(
     progress_cb: Callable[[int, str], None],
     cancel_event: Optional[threading.Event] = None,
     timeout_sec: int = 7200,
+    sessdata: str = "",
 ) -> dict:
-    """使用 yutto 下载 B站视频（含弹幕/AI字幕）。"""
+    """使用 yutto 下载 B站视频（含弹幕/AI字幕）。
+
+    sessdata 非空时以登录态下载：可取高清/大会员/付费内容，并能拉到 B站 AI 字幕。
+    """
+    from app.services.subtitles import find_subtitle_file
+
     merged = _merge_bilibili_m4s(output_dir, logger) or _find_merged_video(output_dir)
     if merged:
         logger.info("yutto skip: using existing video | path=%s", merged)
@@ -221,9 +242,10 @@ def download_yutto(
             "video_path": merged,
             "title": os.path.splitext(os.path.basename(merged))[0],
             "duration_sec": None,
+            "subtitle_path": find_subtitle_file(output_dir),
         }
 
-    logger.info("yutto starting | url=%s", url)
+    logger.info("yutto starting | url=%s sessdata=%s", url, "set" if sessdata else "anonymous")
 
     yutto_bin = _find_tool("yutto")
 
@@ -233,6 +255,9 @@ def download_yutto(
         "-d", output_dir,
         "--no-color",
     ]
+    # 登录态：让 yutto 拿到高清/会员清晰度与 AI 字幕（仅在配置了 SESSDATA 时）
+    if sessdata:
+        cmd.extend(["-c", sessdata])
 
     logger.info("yutto cmd: %s", " ".join(cmd))
     progress_cb(10, "yutto 启动...")
@@ -282,11 +307,15 @@ def download_yutto(
             "yutto 已完成但未找到可播放视频（可能仅有 m4s 分段且合并失败）。请重试"
         )
 
+    subtitle_path = find_subtitle_file(output_dir)
+    if subtitle_path:
+        logger.info("yutto subtitle found | path=%s", subtitle_path)
     progress_cb(100, "yutto 完成")
     return {
         "video_path": video_path,
         "title": os.path.splitext(os.path.basename(video_path))[0],
         "duration_sec": None,
+        "subtitle_path": subtitle_path,
     }
 
 
@@ -299,20 +328,31 @@ def download_gallerydl(
     logger: logging.Logger,
     progress_cb: Callable[[int, str], None],
     cancel_event: Optional[threading.Event] = None,
+    cookies_file: str = "",
+    cookies_from_browser: str = "",
+    proxy: str = "",
 ) -> dict:
-    """使用 gallery-dl 下载小红书图文。返回 {images_dir, title}。"""
-    logger.info("gallery-dl starting | url=%s", url)
+    """使用 gallery-dl 下载图集（微博/快手/IG/X 等降级路径）。返回 {images_dir, title}。
+
+    透传 cookie/proxy，使降级路径与 yt-dlp 主路具备同等反爬能力（此前降级即裸奔）。
+    """
+    logger.info("gallery-dl starting | url=%s cookie=%s proxy=%s",
+                url, "set" if (cookies_file or cookies_from_browser) else "none",
+                "set" if proxy else "none")
 
     gdl_bin = _find_tool("gallery-dl")
 
     images_dir = os.path.join(output_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
 
-    cmd = [
-        gdl_bin,
-        "--dest", images_dir,
-        url,
-    ]
+    cmd = [gdl_bin, "--dest", images_dir]
+    if cookies_file and os.path.exists(cookies_file):
+        cmd.extend(["--cookies", cookies_file])
+    elif cookies_from_browser:
+        cmd.extend(["--cookies-from-browser", cookies_from_browser])
+    if proxy:
+        cmd.extend(["--proxy", proxy])
+    cmd.append(url)
 
     logger.info("gallery-dl cmd: %s", " ".join(cmd))
     progress_cb(20, "gallery-dl 下载中...")
@@ -376,15 +416,27 @@ def _plugin_ytdlp(ctx: DownloadContext) -> dict:
 
 def _plugin_yutto(ctx: DownloadContext) -> dict:
     from app.config import get_config
+    cfg = get_config()
     return download_yutto(
         ctx.url, ctx.output_dir, ctx.job_id, ctx.logger, ctx.progress_cb,
-        ctx.cancel_event, timeout_sec=get_config().yutto_timeout_sec,
+        ctx.cancel_event, timeout_sec=cfg.yutto_timeout_sec,
+        sessdata=cfg.bilibili_sessdata,
     )
 
 
 def _plugin_gallerydl(ctx: DownloadContext) -> dict:
     return download_gallerydl(
         ctx.url, ctx.output_dir, ctx.job_id, ctx.logger, ctx.progress_cb, ctx.cancel_event,
+        cookies_file=ctx.cookies_file, cookies_from_browser=ctx.cookies_from_browser,
+        proxy=ctx.proxy,
+    )
+
+
+def _plugin_wechat(ctx: DownloadContext) -> dict:
+    from app.services.wechat_downloader import download_wechat
+    return download_wechat(
+        ctx.url, ctx.output_dir, logger=ctx.logger,
+        progress_cb=ctx.progress_cb, proxy=ctx.proxy,
     )
 
 
@@ -437,6 +489,7 @@ DOWNLOAD_PLUGINS: dict[str, Callable[["DownloadContext"], dict]] = {
     "gallerydl": _plugin_gallerydl,
     "xhs": _plugin_xhs,
     "local": _plugin_local,
+    "wechat": _plugin_wechat,
 }
 
 

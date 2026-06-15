@@ -65,6 +65,16 @@ class Config:
         return os.environ.get("COOKIES_FROM_BROWSER", "")
 
     @property
+    def bilibili_sessdata(self) -> str:
+        """B站登录态 SESSDATA，传给 yutto（-c）以下载高清/大会员/付费内容。
+
+        yutto 主下载器只认 SESSDATA 字段（不读通用 cookies.txt）。从浏览器 F12 →
+        bilibili.com 的 Cookie 里复制 SESSDATA 的值粘贴到 .env。为空则 yutto 以
+        游客身份下载（仅游客可见清晰度）。
+        """
+        return os.environ.get("BILIBILI_SESSDATA", "").strip()
+
+    @property
     def http_proxy(self) -> str:
         return os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy", "")
 
@@ -203,6 +213,32 @@ class Config:
     def transcribe_backend(self) -> str:
         """转录后端：tingwu（默认，云端）或 whisper（本地 faster-whisper）。"""
         return os.environ.get("TRANSCRIBE_BACKEND", "tingwu")
+
+    @property
+    def transcribe_language(self) -> str:
+        """转写语种提示（ISO 代码，如 zh / en / ja）。
+
+        whisper 后端：为空=自动检测（小模型对中英混杂易误判）；设为 zh 可强制中文，
+        显著降低中文内容的串语种错误。tingwu 后端固定中英 hints，不受此项影响。
+        以中文平台（B站/小红书/微博/公众号）为主时建议设 zh；含大量英文(YouTube/X)时留空。
+        """
+        return os.environ.get("TRANSCRIBE_LANGUAGE", "").strip()
+
+    @property
+    def subtitle_reuse(self) -> bool:
+        """是否复用平台自带字幕作为转写文本（默认开）。仅 0/false/no 关闭；
+        空值(SUBTITLE_REUSE=)等同未设=开，避免"留空一行"被误判为关闭。"""
+        return os.environ.get("SUBTITLE_REUSE", "1").strip().lower() not in ("0", "false", "no")
+
+    @property
+    def subtitle_use_autocaption(self) -> bool:
+        """是否让 yt-dlp 下载并复用"自动生成字幕"（默认关）。
+
+        自动字幕（机器 ASR/机翻、无标点）质量常不及本地 whisper，默认只用官方/人工字幕；
+        且自动字幕可能是与视频语种不符的机翻轨，复用会串语种。设 1 才在官方字幕缺失时
+        也下载自动字幕参与复用。
+        """
+        return os.environ.get("SUBTITLE_USE_AUTOCAPTION", "").strip().lower() in ("1", "true", "yes")
 
     @property
     def whisper_model(self) -> str:
