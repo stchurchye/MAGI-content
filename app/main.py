@@ -38,6 +38,10 @@ def create_app() -> FastAPI:
     logger = logging.getLogger("app")
     logger.info("Starting MAGI-CONTENT...")
 
+    # 启动期防呆:配了代理但不通时,这里就警告(否则等转写阶段才隐晦失败)。
+    from app.services.startup_checks import warn_if_outbound_blocked
+    warn_if_outbound_blocked(config)
+
     # ---- FastAPI ----
     app = FastAPI(title="MAGI-CONTENT", version="0.2.0", lifespan=lifespan)
 
