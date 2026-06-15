@@ -37,6 +37,15 @@ def test_posts_on_failed():
     assert calls[0]["json"] == {"job_id": "job-2", "status": "failed"}
 
 
+def test_cancelled_event_posts_normalized_failed_status():
+    # cancel() 广播 event='cancelled' 但 data.status='failed' —— 必须回调,且归一化为 failed。
+    calls, fake_post = _recorder()
+    cb = make_webhook_subscriber("http://agent/cb", "tok", poster=fake_post)
+    cb("job-c", "cancelled", {"status": "failed", "message": "已取消"})
+    assert len(calls) == 1
+    assert calls[0]["json"] == {"job_id": "job-c", "status": "failed"}
+
+
 def test_skips_non_terminal_events():
     calls, fake_post = _recorder()
     cb = make_webhook_subscriber("http://agent/cb", "tok", poster=fake_post)
