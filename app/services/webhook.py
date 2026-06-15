@@ -11,7 +11,9 @@ import requests
 logger = logging.getLogger("app")
 
 # 仅终态才回调(进行中的进度事件不发,避免噪音)。
-_TERMINAL_EVENTS = {"completed", "failed"}
+# 'cancelled' 也是终态:cancel() 内部把 DB 置 failed 但广播 event='cancelled'
+# (data.status='failed')。纳入这里,否则取消的作业永不回调、接收端会一直卡 pending。
+_TERMINAL_EVENTS = {"completed", "failed", "cancelled"}
 
 
 def make_webhook_subscriber(webhook_url: str, webhook_token: str = "", *, poster=None, timeout: int = 10):
@@ -24,17 +26,20 @@ def make_webhook_subscriber(webhook_url: str, webhook_token: str = "", *, poster
     def _on_event(job_id: str, event: str, data: dict) -> None:
         if event not in _TERMINAL_EVENTS:
             return
+        # 发送权威终态:cancelled 的 data.status='failed',归一化为 failed,
+        # 接收端只需识别 completed/failed 两态(契约不变)。
+        status = (data or {}).get("status") or event
         headers = {"Content-Type": "application/json"}
         if webhook_token:
             headers["Authorization"] = f"Bearer {webhook_token}"
         try:
             post(
                 webhook_url,
-                json={"job_id": job_id, "status": event},
+                json={"job_id": job_id, "status": status},
                 headers=headers,
                 timeout=timeout,
             )
-            logger.info("webhook 已发送 | job_id=%s status=%s", job_id, event)
+            logger.info("webhook 已发送 | job_id=%s status=%s", job_id, status)
         except Exception:
             # best-effort:回调失败不回滚作业,只记日志(接收端也可改用轮询兜底)。
             logger.warning(
