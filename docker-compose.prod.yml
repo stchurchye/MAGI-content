@@ -1,0 +1,60 @@
+# 生产加固覆盖层(单 VPS · 内网专用 · 不暴露公网)
+#
+# 用法:
+#   docker network create magi-net                 # 三服务共享内网(若未建)
+#   生成 AUTH_TOKEN / WEBHOOK_TOKEN 写入 .env:
+#     python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+#     AUTH_TOKEN    必须 == agent 侧 MAGI_CONTENT_TOKEN
+#     WEBHOOK_TOKEN 必须 == agent 侧 MAGI_CONTENT_CALLBACK_TOKEN
+#     WEBHOOK_URL=http://xzz-api:3922/api/magi-content/callback
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# 相对 base 的变化:不发布 host 端口(仅 magi-net 内网,agent 用 http://magi-content:8080 访问)、
+# ENVIRONMENT=production(缺 AUTH_TOKEN 拒绝启动)、清空 dev 代理、无 --reload / 无源码 bind-mount、
+# 资源限额(下载+whisper+ffmpeg 重)、日志上限。
+name: magi-content
+services:
+  magi-content:
+    # 固定容器名:agent 跨 compose 项目按 http://magi-content:8080 访问,显式名最稳。
+    container_name: magi-content
+    # 不再发布 8080 到宿主:server-to-server 后端,只走内网。
+    ports: !reset []
+    environment:
+      ENVIRONMENT: production
+      AUTH_TOKEN: ${AUTH_TOKEN:?生产必须设置 AUTH_TOKEN(== agent MAGI_CONTENT_TOKEN)}
+      # VPS 上无 host.docker.internal 代理:清空走直连(如需企业代理改这两行)。
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: "localhost,127.0.0.1"
+    # 仅保留运行时持久数据卷;去掉 dev 的源码/模板/静态 bind-mount(改用镜像内 COPY)。
+    # !override(非 !reset):!reset 只置空丢弃后续 list,!override 才用替换值整体覆盖 base。
+    volumes: !override
+      - ./storage:/app/storage
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # 生产 uvicorn:无 --reload。同理用 !override 才能真正替换 base 的 command。
+    command: !override
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+      ]
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - default
+      - magi-net
+
+networks:
+  magi-net:
+    external: true

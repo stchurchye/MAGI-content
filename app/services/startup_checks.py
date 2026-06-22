@@ -21,6 +21,20 @@ def check_outbound(proxy: str, *, getter=None, url: str = "https://huggingface.c
         return False
 
 
+def assert_auth_config(config) -> None:
+    """生产 fail-closed:ENVIRONMENT=production 时必须配置 AUTH_TOKEN。
+
+    本服务是 server-to-server 后端(下载/转写),默认不应暴露公网;即便仅内网,
+    也要求 token 防内网横移。开发环境(默认)不强制,便于本地零配置自测。
+    """
+    env = (getattr(config, "environment", "") or "").lower()
+    if env == "production" and not config.auth_token:
+        raise RuntimeError(
+            "ENVIRONMENT=production 必须设置 AUTH_TOKEN(server-to-server 鉴权):"
+            "请生成强随机 token 并与 agent 侧 MAGI_CONTENT_TOKEN 保持一致。"
+        )
+
+
 def warn_if_outbound_blocked(config, *, getter=None) -> None:
     """配了代理就探一下;不通则打醒目 warning(指明 whisper 模型下载会受影响 + 怎么修)。"""
     proxy = config.http_proxy or config.https_proxy

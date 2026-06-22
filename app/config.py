@@ -137,10 +137,17 @@ class Config:
         """从浏览器读取小红书 Cookie：chrome / safari / edge 等"""
         return os.environ.get("XHS_COOKIE_FROM_BROWSER", "") or self.cookies_from_browser
 
+    # ---- 运行环境 ----
+    @property
+    def environment(self) -> str:
+        """运行环境。production 时强制要求 AUTH_TOKEN(fail-closed,见 startup_checks.assert_auth_config)。
+        默认 development:本地零配置自测、不强制鉴权。"""
+        return os.environ.get("ENVIRONMENT", "development").strip().lower()
+
     # ---- 认证 ----
     @property
     def auth_token(self) -> str:
-        """可选的 Bearer Token 认证，为空则不启用"""
+        """Bearer Token 认证。开发可留空(不启用);生产(ENVIRONMENT=production)必须设置。"""
         return os.environ.get("AUTH_TOKEN", "")
 
     # ---- 完成回调 webhook ----
