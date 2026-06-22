@@ -38,8 +38,12 @@ def create_app() -> FastAPI:
     logger = logging.getLogger("app")
     logger.info("Starting MAGI-CONTENT...")
 
+    # 生产 fail-closed:ENVIRONMENT=production 必须配 AUTH_TOKEN(server-to-server 鉴权)。
+    # 缺失即拒绝启动,杜绝"默认无认证 + 公网可达"的高危默认态。
+    from app.services.startup_checks import assert_auth_config, warn_if_outbound_blocked
+    assert_auth_config(config)
+
     # 启动期防呆:配了代理但不通时,这里就警告(否则等转写阶段才隐晦失败)。
-    from app.services.startup_checks import warn_if_outbound_blocked
     warn_if_outbound_blocked(config)
 
     # ---- FastAPI ----
