@@ -64,6 +64,8 @@ def create_app() -> FastAPI:
         from fastapi.responses import JSONResponse
         from starlette.middleware.base import BaseHTTPMiddleware
 
+        import hmac
+
         class TokenAuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
                 path = request.url.path
@@ -72,19 +74,17 @@ def create_app() -> FastAPI:
 
                 token = config.auth_token
                 auth_header = request.headers.get("authorization", "")
-                query_token = request.query_params.get("token", "")
+                # 仅接受 Authorization: Bearer 头与 cookie;去掉 ?token= 查询参数
+                # (会进访问日志/Referer 泄露)。比较用 hmac.compare_digest 防时序侧信道。
+                presented = auth_header[7:] if auth_header.startswith("Bearer ") else ""
                 cookie_token = request.cookies.get("auth_token", "")
-
-                if (auth_header == f"Bearer {token}" or
-                        query_token == token or
-                        cookie_token == token):
+                ok = (
+                    (presented and hmac.compare_digest(presented, token))
+                    or (cookie_token and hmac.compare_digest(cookie_token, token))
+                )
+                if ok:
                     return await call_next(request)
 
-                if request.headers.get("accept", "").startswith("text/html"):
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Unauthorized. Pass ?token=<AUTH_TOKEN> to authenticate."},
-                    )
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
         app.add_middleware(TokenAuthMiddleware)
