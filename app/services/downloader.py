@@ -47,7 +47,10 @@ def _build_ydl_opts(
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 3,
-        # 滥用防护:单文件大小上限(超限中止下载);时长上限(元数据缺失如直播放行)。
+        # 滥用防护:单文件大小上限 + 时长上限(元数据缺失如直播放行)。
+        # ⚠️ 局限:yt-dlp 的 max_filesize 仅对渐进式(http/external)下载生效,对 HLS/DASH
+        # 分片无效;且这两个限制只作用于 yt-dlp,yutto(B站)/gallery-dl(小红书等)不受约束
+        # (它们靠 wall-clock timeout)。故【时长上限是更可靠的总闸】,大小上限为尽力而为。
         "max_filesize": _cfg.max_download_mb * 1024 * 1024,
         "match_filter": _duration_match_filter(_cfg.max_duration_sec),
         # 顺带拉取官方字幕（YouTube 等）：命中即被流水线复用为 transcript，免去本地
