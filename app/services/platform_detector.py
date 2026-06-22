@@ -252,6 +252,16 @@ def detect_platform(url: str) -> tuple[PlatformRule, str]:
     return PLATFORM_RULES["generic"], "generic"
 
 
+def is_supported_platform_url(url: str) -> bool:
+    """host 是否匹配已知平台域名(SSRF 纵深白名单用)。generic / 解析失败 → False。
+
+    复用 detect_platform 的匹配:仅 'domain' 算已知平台('generic' 为未知 host 兜底,
+    'local' 是本地文件输入,均不属于"可下载的已知公网平台")。
+    """
+    _rule, mode = detect_platform(url)
+    return mode == "domain"
+
+
 def get_platform_note(url: str) -> str:
     """获取平台备注信息（用于前端提示）。"""
     rule, _ = detect_platform(url)

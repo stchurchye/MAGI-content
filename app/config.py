@@ -150,6 +150,18 @@ class Config:
         """Bearer Token 认证。开发可留空(不启用);生产(ENVIRONMENT=production)必须设置。"""
         return os.environ.get("AUTH_TOKEN", "")
 
+    @property
+    def allow_generic_download(self) -> bool:
+        """是否允许下载非白名单平台(generic/未知 host)。SSRF 纵深防御:
+        生产默认仅允许已知平台域名(挡掉任意 URL → yt-dlp generic 的 SSRF/重定向面);
+        开发默认放开便于测试。显式 MAGI_CONTENT_ALLOW_GENERIC=1/0 覆盖。"""
+        v = os.environ.get("MAGI_CONTENT_ALLOW_GENERIC", "").strip().lower()
+        if v in ("1", "true", "yes"):
+            return True
+        if v in ("0", "false", "no"):
+            return False
+        return self.environment != "production"
+
     # ---- 完成回调 webhook ----
     @property
     def webhook_url(self) -> str:
