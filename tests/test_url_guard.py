@@ -6,7 +6,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.url_guard import assert_safe_download_url
+from app.services.url_guard import assert_download_url_allowed, assert_safe_download_url
+from app.services.platform_detector import is_supported_platform_url
 
 
 def _resolver_to(ip):
@@ -56,3 +57,45 @@ def test_reject_cgnat():
 def test_missing_host():
     with pytest.raises(ValueError, match="主机名"):
         assert_safe_download_url("http://", resolver=_resolver_to("1.1.1.1"))
+
+
+def test_reject_nat64_to_private():
+    # 64:ff9b::0a00:0001 = NAT64 映射 10.0.0.1(内网),应拒
+    with pytest.raises(ValueError, match="NAT64|内网|保留"):
+        assert_safe_download_url("https://h/", resolver=_resolver_to("64:ff9b::a00:1"))
+
+
+# ---- 平台白名单(纵深) ----
+
+def test_is_supported_platform_url():
+    assert is_supported_platform_url("https://www.youtube.com/watch?v=x")
+    assert is_supported_platform_url("https://b23.tv/abc")
+    assert not is_supported_platform_url("https://example.com/video.mp4")
+
+
+def test_allow_generic_true_permits_unknown_public():
+    # allow_generic=True:未知公网平台仅过 IP 守卫即可
+    assert_download_url_allowed(
+        "https://example.com/v.mp4", allow_generic=True, resolver=_resolver_to("93.184.216.34")
+    )
+
+
+def test_allow_generic_false_rejects_unknown_platform():
+    with pytest.raises(ValueError, match="白名单"):
+        assert_download_url_allowed(
+            "https://example.com/v.mp4", allow_generic=False, resolver=_resolver_to("93.184.216.34")
+        )
+
+
+def test_allow_generic_false_permits_known_platform():
+    assert_download_url_allowed(
+        "https://www.youtube.com/watch?v=x", allow_generic=False, resolver=_resolver_to("93.184.216.34")
+    )
+
+
+def test_ip_guard_runs_before_platform_check():
+    # 已知平台但解析到内网(DNS 投毒)仍被 IP 守卫先拦下
+    with pytest.raises(ValueError, match="内网|保留"):
+        assert_download_url_allowed(
+            "https://www.youtube.com/x", allow_generic=False, resolver=_resolver_to("10.0.0.1")
+        )

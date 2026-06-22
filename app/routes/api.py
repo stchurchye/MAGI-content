@@ -361,12 +361,12 @@ async def create_job(
 
     urls = [u.strip() for u in url.splitlines() if u.strip()]
 
-    # SSRF 守卫:所有下载的统一咽喉点。任一 URL 指向内网/保留地址/云元数据即整批拒绝,
-    # 不论下载器是否走代理(用户提交 IP 字面量时本地即可拦)。先校验再落库,避免脏 job。
-    from app.services.url_guard import assert_safe_download_url
+    # SSRF 守卫:所有下载的统一咽喉点。任一 URL 指向内网/保留地址/云元数据(或非白名单平台)
+    # 即整批拒绝,不论下载器是否走代理。先校验再落库,避免脏 job。
+    from app.services.url_guard import assert_download_url_allowed
     for u in urls:
         try:
-            assert_safe_download_url(u)
+            assert_download_url_allowed(u, allow_generic=cfg.allow_generic_download)
         except ValueError as e:
             conn.close()
             raise HTTPException(status_code=400, detail=f"URL 被拒: {u} — {e}") from e
@@ -593,9 +593,9 @@ async def retry_job(job_id: str):
 
     # 重试前重跑 SSRF 守卫(与 create_job 对齐):防止旧 job 的 URL 在守卫上线前入库、
     # 或 DNS 在此期间被改指向内网。
-    from app.services.url_guard import assert_safe_download_url
+    from app.services.url_guard import assert_download_url_allowed
     try:
-        assert_safe_download_url(row["url"])
+        assert_download_url_allowed(row["url"], allow_generic=cfg.allow_generic_download)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"URL 被拒: {row['url']} — {e}") from e
 

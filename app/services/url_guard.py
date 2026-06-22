@@ -51,3 +51,27 @@ def assert_safe_download_url(url: str, *, resolver=None) -> None:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
             raise ValueError("拒绝访问内网/保留地址(SSRF 防护)")
+        # NAT64(64:ff9b::/96)把 IPv4 嵌进 IPv6,is_global 可能放行,但其嵌入地址可指内网。
+        if ip.version == 6 and ip in _NAT64_PREFIX:
+            embedded = ipaddress.ip_address(int(ip) & 0xFFFFFFFF)
+            if not embedded.is_global:
+                raise ValueError("拒绝 NAT64 映射到内网/保留地址(SSRF 防护)")
+
+
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+
+def assert_download_url_allowed(url: str, *, allow_generic: bool, resolver=None) -> None:
+    """下载入口统一守卫:IP 安全(总是)+ 平台白名单(纵深,allow_generic=False 时)。
+
+    allow_generic=False(生产默认)时,仅放行已知平台域名 —— 把"任意 URL → yt-dlp
+    generic"这条最易被滥用、且会跟随重定向的路径关掉,显著缩小 SSRF 面。
+    """
+    assert_safe_download_url(url, resolver=resolver)
+    if not allow_generic:
+        from app.services.platform_detector import is_supported_platform_url
+
+        if not is_supported_platform_url(url):
+            raise ValueError(
+                "非白名单平台:仅允许已知平台域名;如需任意来源,设 MAGI_CONTENT_ALLOW_GENERIC=1"
+            )
