@@ -59,6 +59,25 @@ def test_missing_host():
         assert_safe_download_url("http://", resolver=_resolver_to("1.1.1.1"))
 
 
+def test_schemeless_known_platform_allowed():
+    # 无 scheme 的平台 URL(pipeline 会补 https)应通过,不被误拒(回归 #3)
+    assert_download_url_allowed(
+        "youtube.com/watch?v=x", allow_generic=False, resolver=_resolver_to("93.184.216.34")
+    )
+
+
+def test_schemeless_still_ip_guarded():
+    # 无 scheme 但解析到内网 → 补 https 后 IP 守卫照常拦
+    with pytest.raises(ValueError, match="内网|保留"):
+        assert_safe_download_url("youtube.com/x", resolver=_resolver_to("10.0.0.1"))
+
+
+def test_local_path_as_url_rejected():
+    # 本地文件路径当 URL 提交 → 补 https 后 host 为空 → 拒(防 LFI 误放行)
+    with pytest.raises(ValueError):
+        assert_safe_download_url("/app/storage/x.mp4", resolver=_resolver_to("1.1.1.1"))
+
+
 def test_reject_nat64_to_private():
     # 64:ff9b::0a00:0001 = NAT64 映射 10.0.0.1(内网),应拒
     with pytest.raises(ValueError, match="NAT64|内网|保留"):

@@ -34,6 +34,11 @@ def assert_safe_download_url(url: str, *, resolver=None) -> None:
     """
     getaddrinfo = resolver or socket.getaddrinfo
     p = urlparse(url)
+    # 无 scheme 的 URL(如 youtube.com/watch...)pipeline 的 normalize_url 会补 https://;
+    # 守卫按同样规则校验,否则既有可用输入会被误拒。本地文件路径(/app/...)补 https 后
+    # host 为空,仍会被下面的 no-host 检查拦下,不构成放行。
+    if not p.scheme:
+        p = urlparse("https://" + url)
     if p.scheme not in ("http", "https"):
         raise ValueError(f"仅支持 http/https 链接,拒绝 {p.scheme or '空'} 协议")
     host = p.hostname

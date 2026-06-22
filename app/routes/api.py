@@ -592,12 +592,18 @@ async def retry_job(job_id: str):
         )
 
     # 重试前重跑 SSRF 守卫(与 create_job 对齐):防止旧 job 的 URL 在守卫上线前入库、
-    # 或 DNS 在此期间被改指向内网。
+    # 或 DNS 在此期间被改指向内网。但本地上传任务的 url 存的是 storage 内的文件路径
+    # (非远程 URL,upload 时已校验在 storage 内),不是 SSRF 向量,跳过守卫,否则上传类
+    # 任务永远无法重试(文件路径非 http→被拒 400)。
     from app.services.url_guard import assert_download_url_allowed
-    try:
-        assert_download_url_allowed(row["url"], allow_generic=cfg.allow_generic_download)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"URL 被拒: {row['url']} — {e}") from e
+    from app.services.platform_detector import detect_platform
+
+    _, _mode = detect_platform(row["url"])
+    if _mode != "local":
+        try:
+            assert_download_url_allowed(row["url"], allow_generic=cfg.allow_generic_download)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"URL 被拒: {row['url']} — {e}") from e
 
     pipeline = get_pipeline_manager()
     result = pipeline.retry(job_id)
