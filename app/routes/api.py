@@ -371,6 +371,15 @@ async def create_job(
             conn.close()
             raise HTTPException(status_code=400, detail=f"URL 被拒: {u} — {e}") from e
 
+    # 并发上限:活跃任务 + 本批超过上限即拒,防排队轰炸耗尽 CPU/磁盘/出网。
+    active = len(list_active_jobs(conn))
+    if active + len(urls) > cfg.max_active_jobs:
+        conn.close()
+        raise HTTPException(
+            status_code=429,
+            detail=f"活跃任务过多（{active}/{cfg.max_active_jobs}），请稍后再试",
+        )
+
     created: list[dict] = []
 
     for u in urls:

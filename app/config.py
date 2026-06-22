@@ -187,6 +187,30 @@ class Config:
         except (TypeError, ValueError):
             return 2048
 
+    @property
+    def max_download_mb(self) -> int:
+        """单个下载文件大小上限（MB），防超大视频耗尽磁盘/出网。"""
+        try:
+            return int(os.environ.get("MAX_DOWNLOAD_MB", "2048"))
+        except (TypeError, ValueError):
+            return 2048
+
+    @property
+    def max_duration_sec(self) -> int:
+        """下载视频时长上限（秒，默认 4h），防超长视频。元数据缺失（直播等）不拦。"""
+        try:
+            return int(os.environ.get("MAX_DURATION_SEC", "14400"))
+        except (TypeError, ValueError):
+            return 14400
+
+    @property
+    def max_active_jobs(self) -> int:
+        """同时进行中的任务数上限，超过则拒绝新提交（防排队轰炸耗尽 CPU/磁盘/出网）。"""
+        try:
+            return int(os.environ.get("MAX_ACTIVE_JOBS", "20"))
+        except (TypeError, ValueError):
+            return 20
+
     # ---- 重试 ----
     max_retry_count: int = 3
 
