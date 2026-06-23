@@ -25,16 +25,9 @@ def create_app() -> FastAPI:
     config = get_config()
 
     # ---- 日志 ----
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(
-                os.path.join(config.logs_dir, "app.log"), encoding="utf-8"
-            ),
-        ],
-    )
+    # 统一结构化 JSON(stdout + logs/app.log),便于集中采集(Loki/Grafana)与跨服务 request_id 串联。
+    from app.logging_setup import setup_logging
+    setup_logging(config.logs_dir)
     logger = logging.getLogger("app")
     logger.info("Starting MAGI-CONTENT...")
 
@@ -57,6 +50,19 @@ def create_app() -> FastAPI:
     # 挂载 config
     app.state.config = config
     app.state.logger = logger
+
+    # 全局异常兜底:未预期异常记完整堆栈便于排障,客户端只回脱敏 500;
+    # HTTP/校验异常交回 FastAPI 默认处理(各自 4xx,不记栈不刷 error 告警)。
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(request, exc):
+        if isinstance(exc, (StarletteHTTPException, RequestValidationError)):
+            raise exc
+        logger.error("未捕获异常", exc_info=exc, extra={"event": "unhandled_exception"})
+        return _JSONResponse(status_code=500, content={"detail": "服务器内部错误，请稍后重试"})
 
     # 可选认证中间件
     if config.auth_token:
@@ -92,6 +98,11 @@ def create_app() -> FastAPI:
 
         app.add_middleware(TokenAuthMiddleware)
         logger.info("Token auth enabled")
+
+    # 请求日志中间件:无条件注册(与鉴权解耦),且在 TokenAuth 之后 add → 最外层,
+    # 使被 Auth 拒绝的 401 也能记一条请求日志并带上 request_id。
+    from app.request_log_middleware import RequestLogMiddleware
+    app.add_middleware(RequestLogMiddleware)
 
     # 完成回调 webhook（可选）：作业终态时 POST 通知外部接收端（如 agent）。
     if config.webhook_url:
