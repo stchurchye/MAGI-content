@@ -39,12 +39,16 @@ def make_webhook_subscriber(webhook_url: str, webhook_token: str = "", *, poster
                 headers=headers,
                 timeout=timeout,
             )
-            logger.info("webhook 已发送 | job_id=%s status=%s", job_id, status)
+            logger.info(
+                "webhook 已发送",
+                extra={"event": "webhook_sent", "job_id": job_id, "status": status, "target": webhook_url},
+            )
         except Exception:
             # best-effort:回调失败不回滚作业,只记日志(接收端也可改用轮询兜底)。
             logger.warning(
-                "webhook POST 失败 | job_id=%s status=%s url=%s",
-                job_id, event, webhook_url, exc_info=True,
+                "webhook 发送失败",
+                extra={"event": "webhook_failed", "job_id": job_id, "status": status, "target": webhook_url},
+                exc_info=True,
             )
 
     return _on_event
