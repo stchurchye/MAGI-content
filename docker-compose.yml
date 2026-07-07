@@ -12,6 +12,8 @@ services:
       HTTP_PROXY: ${HTTP_PROXY-http://host.docker.internal:7890}
       HTTPS_PROXY: ${HTTPS_PROXY-http://host.docker.internal:7890}
       NO_PROXY: ${NO_PROXY-localhost,127.0.0.1,host.docker.internal}
+      # 统一 JSON 日志(logging_setup.py)的级别;排障时临时调 DEBUG。
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./storage:/app/storage
       - ./data:/app/data
