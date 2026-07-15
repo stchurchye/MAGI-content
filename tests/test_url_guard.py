@@ -118,3 +118,36 @@ def test_ip_guard_runs_before_platform_check():
         assert_download_url_allowed(
             "https://www.youtube.com/x", allow_generic=False, resolver=_resolver_to("10.0.0.1")
         )
+
+
+# ---- fake-ip 模式(Clash TUN 等):trust_fakeip 仅放行 198.18.0.0/15 ----
+
+def test_fakeip_rejected_by_default():
+    # 默认关:fake-ip 段照拒(无代理环境不放水)
+    with pytest.raises(ValueError, match="内网|保留"):
+        assert_safe_download_url("https://chatgpt.com/share/x", resolver=_resolver_to("198.18.2.61"))
+
+
+def test_fakeip_allowed_when_trusted():
+    assert_safe_download_url(
+        "https://chatgpt.com/share/x", resolver=_resolver_to("198.18.2.61"), trust_fakeip=True
+    )
+
+
+def test_trust_fakeip_does_not_open_private_ranges():
+    # 开关只豁免 fake-ip 段;真内网/环回/链路本地照拒
+    for bad in ("10.0.0.1", "127.0.0.1", "169.254.169.254", "192.168.1.1", "100.64.0.1"):
+        with pytest.raises(ValueError):
+            assert_safe_download_url(
+                "https://evil.example.com/", resolver=_resolver_to(bad), trust_fakeip=True
+            )
+
+
+def test_trust_fakeip_keeps_metadata_host_block():
+    # 云元数据端点按主机名硬封,与解析结果无关
+    with pytest.raises(ValueError, match="元数据"):
+        assert_safe_download_url(
+            "http://169.254.169.254/latest/meta-data/",
+            resolver=_resolver_to("198.18.0.9"),
+            trust_fakeip=True,
+        )

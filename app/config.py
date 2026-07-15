@@ -162,6 +162,17 @@ class Config:
             return False
         return self.environment != "production"
 
+    @property
+    def trust_fakeip_dns(self) -> bool:
+        """宿主 DNS 为代理 fake-ip 模式(如 Clash TUN)时设 1:所有外网域名都会解析到
+        198.18.0.0/15(RFC2544 基准测试保留段),`ip.is_global` 必为 False,SSRF 守卫会把
+        **一切**经代理域名误杀(2026-07-15 实况:b23/bilibili/chatgpt 全解析到 198.18.x,
+        链接转写整体瘫痪)。打开后仅对该保留段放行——连接 fake-ip 由代理按域名转发,
+        到不了真内网;IP 字面量内网地址/云元数据端点不走 DNS,照常被拒。
+        默认关(无代理环境维持全量防护)。"""
+        v = os.environ.get("MAGI_CONTENT_TRUST_FAKEIP_DNS", "").strip().lower()
+        return v in ("1", "true", "yes")
+
     # ---- 完成回调 webhook ----
     @property
     def webhook_url(self) -> str:

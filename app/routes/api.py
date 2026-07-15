@@ -366,7 +366,9 @@ async def create_job(
     from app.services.url_guard import assert_download_url_allowed
     for u in urls:
         try:
-            assert_download_url_allowed(u, allow_generic=cfg.allow_generic_download)
+            assert_download_url_allowed(
+                u, allow_generic=cfg.allow_generic_download, trust_fakeip=cfg.trust_fakeip_dns
+            )
         except ValueError as e:
             conn.close()
             raise HTTPException(status_code=400, detail=f"URL 被拒: {u} — {e}") from e
@@ -610,7 +612,9 @@ async def retry_job(job_id: str):
     _, _mode = detect_platform(row["url"])
     if _mode != "local":
         try:
-            assert_download_url_allowed(row["url"], allow_generic=cfg.allow_generic_download)
+            assert_download_url_allowed(
+                row["url"], allow_generic=cfg.allow_generic_download, trust_fakeip=cfg.trust_fakeip_dns
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"URL 被拒: {row['url']} — {e}") from e
 
